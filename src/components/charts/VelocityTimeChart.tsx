@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -28,9 +28,10 @@ interface SimulationDataPoint {
 
 interface ChartProps {
   history: SimulationDataPoint[];
+  currentTime: number;
 }
 
-const commonOptions = {
+const commonOptionsBase = {
   responsive: true,
   maintainAspectRatio: false,
   scales: {
@@ -74,7 +75,45 @@ const commonOptions = {
   }
 };
 
-const VelocityTimeChart: React.FC<ChartProps> = ({ history }) => {
+const VelocityTimeChart: React.FC<ChartProps> = ({ history, currentTime }) => {
+  const customTimeIndicatorPlugin = useMemo(() => ({
+    id: 'customTimeIndicator',
+    afterDraw: (chart: any) => {
+      const currentPluginTime = chart.options.plugins.customTimeIndicator?.currentTime;
+      if (typeof currentPluginTime !== 'number' || chart.tooltip?.getActiveElements()?.length) return;
+
+      const ctx = chart.ctx;
+      const xAxis = chart.scales.x;
+      const yAxis = chart.scales.y;
+
+      if (!xAxis || !yAxis) return;
+
+      const xPos = xAxis.getPixelForValue(currentPluginTime);
+
+      if (xPos >= xAxis.left && xPos <= xAxis.right) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(xPos, yAxis.top);
+        ctx.lineTo(xPos, yAxis.bottom);
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(220, 53, 69, 0.7)';
+        ctx.setLineDash([4, 4]);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }), []);
+
+  const chartOptions = useMemo(() => ({
+    ...commonOptionsBase,
+    plugins: {
+      ...commonOptionsBase.plugins,
+      customTimeIndicator: {
+        currentTime: currentTime
+      }
+    }
+  }), [currentTime]);
+
   if (!history || history.length === 0) {
     return <div className="p-4 text-center text-text-secondary">No data</div>;
   }
@@ -95,7 +134,7 @@ const VelocityTimeChart: React.FC<ChartProps> = ({ history }) => {
     ],
   };
 
-  return <Line options={commonOptions} data={chartData} />;
+  return <Line options={chartOptions} data={chartData} plugins={[customTimeIndicatorPlugin]} />;
 };
 
 export default VelocityTimeChart; 

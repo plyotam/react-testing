@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Download, Upload, Settings, Play, RotateCcw, Trash2, Image, Zap, Target, Square, BarChart2 } from 'lucide-react';
+import { Download, Upload, Settings, Play, RotateCcw, Trash2, Image, Zap, Target, Square, BarChart2, GripVertical, Ruler } from 'lucide-react';
 import { CubicSpline } from './utils/CubicSpline';
 import { QuinticSpline } from './utils/QuinticSpline';
 import ConfigInput from './components/ConfigInput';
@@ -75,7 +75,9 @@ const HolonomicPathOptimizer = () => {
       waypointColor: '#10b981',
       waypointBorderColor: '#065f46',
       selectedColor: '#f59e0b',
-      velocityVisualization: true
+      velocityVisualization: true,
+      accentPrimary: '#3498db', // Default accent color (blue)
+      textPrimary: '#ecf0f1'    // Default text color (light gray/white)
     },
     physics: {
       frictionCoefficient: 0.8,
@@ -138,6 +140,15 @@ const HolonomicPathOptimizer = () => {
   // State for simulation time slider
   const [displayTime, setDisplayTime] = useState(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
+
+  // State for waypoint drag-and-drop reordering
+  const [draggedWaypointSourceIndex, setDraggedWaypointSourceIndex] = useState<number | null>(null);
+
+  // State for measuring tool
+  const [isMeasuring, setIsMeasuring] = useState(false);
+  const [measurePoints, setMeasurePoints] = useState<Point[]>([]);
+  const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
+  const [measurePreviewPoint, setMeasurePreviewPoint] = useState<Point | null>(null); // For live preview
 
   const animationFrameIdRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
@@ -791,7 +802,103 @@ const HolonomicPathOptimizer = () => {
     
     ctx.restore(); // Restore context to pre-transformation state
     
-  }, [config, waypoints, selectedWaypoint, robotState, optimizedPath, backgroundImage, metersToPixels]);
+    // Draw measuring tool elements if active
+    if (isMeasuring) {
+      // Theme-aligned colors (Orange/Grey)
+      const orangeAccent = config.path.selectedColor || '#f59e0b'; // Orange from theme (selectedColor)
+      const lightGreyText = config.path.textPrimary || '#ecf0f1';    // Light grey from theme (textPrimary)
+      // Dark semi-transparent grey for text background
+      const textBackgroundColor = 'rgba(75, 75, 75, 0.75)'; 
+
+      const pointRadius = 6;
+      const crosshairSize = 4;
+
+      measurePoints.forEach((point, index) => {
+        const pixelX = metersToPixels(point.x);
+        const pixelY = metersToPixels(point.y);
+        
+        // Draw measure point (outlined circle)
+        ctx.strokeStyle = orangeAccent;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(pixelX, pixelY, pointRadius, 0, 2 * Math.PI);
+        ctx.stroke();
+        
+        // Crosshair
+        ctx.strokeStyle = lightGreyText; 
+        ctx.lineWidth = 1; 
+        ctx.beginPath();
+        ctx.moveTo(pixelX - crosshairSize, pixelY);
+        ctx.lineTo(pixelX + crosshairSize, pixelY);
+        ctx.moveTo(pixelX, pixelY - crosshairSize);
+        ctx.lineTo(pixelX, pixelY + crosshairSize);
+        ctx.stroke();
+        
+        // Draw point number
+        ctx.fillStyle = lightGreyText; 
+        ctx.font = 'bold 11px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(`${index + 1}`, pixelX, pixelY - pointRadius - 4);
+      });
+
+      const drawDistanceText = (text: string, midX: number, midY: number) => {
+        ctx.font = 'bold 13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        const textMetrics = ctx.measureText(text);
+        const textWidth = textMetrics.width;
+        const textHeight = 13; 
+        const padding = 5;
+
+        ctx.fillStyle = textBackgroundColor;
+        ctx.beginPath();
+        ctx.rect(midX - textWidth / 2 - padding, midY - textHeight - padding, textWidth + padding * 2, textHeight + padding * 2);
+        ctx.fill();
+
+        ctx.fillStyle = lightGreyText; 
+        ctx.fillText(text, midX, midY);
+      };
+
+      // Live preview drawing
+      if (measurePoints.length === 1 && measurePreviewPoint) {
+        const p1 = {x: metersToPixels(measurePoints[0].x), y: metersToPixels(measurePoints[0].y)};
+        const pPreview = {x: metersToPixels(measurePreviewPoint.x), y: metersToPixels(measurePreviewPoint.y)};
+        
+        ctx.strokeStyle = orangeAccent; // Use orangeAccent for line
+        ctx.lineWidth = 1.5; 
+        ctx.setLineDash([4, 4]); 
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(pPreview.x, pPreview.y);
+        ctx.stroke();
+        ctx.setLineDash([]); 
+
+        const midX = (p1.x + pPreview.x) / 2;
+        const midY = (p1.y + pPreview.y) / 2 - 10; 
+        const dx = measurePreviewPoint.x - measurePoints[0].x;
+        const dy = measurePreviewPoint.y - measurePoints[0].y;
+        const currentPreviewDistance = Math.sqrt(dx*dx + dy*dy);
+        drawDistanceText(`${currentPreviewDistance.toFixed(2)} m`, midX, midY);
+      } 
+      // Drawing for finalized measurement
+      else if (measurePoints.length === 2 && measuredDistance !== null) {
+        const p1 = {x: metersToPixels(measurePoints[0].x), y: metersToPixels(measurePoints[0].y)};
+        const p2 = {x: metersToPixels(measurePoints[1].x), y: metersToPixels(measurePoints[1].y)};
+
+        ctx.strokeStyle = orangeAccent; // Use orangeAccent for line
+        ctx.lineWidth = 2; 
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+
+        const midX = (p1.x + p2.x) / 2;
+        const midY = (p1.y + p2.y) / 2 - 10; 
+        drawDistanceText(`${measuredDistance.toFixed(2)} m`, midX, midY);
+      }
+    }
+  }, [config, waypoints, selectedWaypoint, robotState, optimizedPath, backgroundImage, metersToPixels, isMeasuring, measurePoints, measuredDistance, measurePreviewPoint]);
 
   useEffect(() => {
     drawCanvas();
@@ -803,12 +910,37 @@ const HolonomicPathOptimizer = () => {
     const rect = canvas.getBoundingClientRect();
     const pixelX = e.clientX - rect.left;
     const pixelY = e.clientY - rect.top;
+    const meterX = pixelsToMeters(pixelX);
+    const meterY = pixelsToMeters(pixelY);
     
     setMouseDownPosition({ x: pixelX, y: pixelY });
 
-    const meterX = pixelsToMeters(pixelX);
-    const meterY = pixelsToMeters(pixelY);
+    if (isMeasuring) {
+      setMeasurePoints(prevPoints => {
+        if (prevPoints.length === 0) { // First click for a new measurement
+          setMeasuredDistance(null); 
+          setMeasurePreviewPoint(null); // Reset preview explicitly
+          return [{ x: meterX, y: meterY }];
+        } else if (prevPoints.length === 1) { // Second click, finalizing measurement
+          const newPoints = [...prevPoints, { x: meterX, y: meterY }];
+          const dx = newPoints[1].x - newPoints[0].x;
+          const dy = newPoints[1].y - newPoints[0].y;
+          setMeasuredDistance(Math.sqrt(dx*dx + dy*dy));
+          setMeasurePreviewPoint(null); // Finalized measurement, clear preview
+          return newPoints;
+        } else { // prevPoints.length === 2, effectively a first click for a new measurement
+          setMeasuredDistance(null);
+          setMeasurePreviewPoint(null); // Reset preview explicitly
+          return [{ x: meterX, y: meterY }];
+        }
+      });
+      setSelectedWaypoint(null);
+      setIsDragging(false);
+      setDraggingWaypointIndex(null);
+      return; 
+    }
 
+    // Existing waypoint interaction logic (only if not measuring)
     const clickedWaypointIndex = waypoints.findIndex(wp => {
       const distance = Math.sqrt((wp.x - meterX) ** 2 + (wp.y - meterY) ** 2);
       return distance <= wp.radius;
@@ -820,23 +952,32 @@ const HolonomicPathOptimizer = () => {
       setIsDragging(true);
     } else {
       setSelectedWaypoint(null); // Click on empty space deselects
-      // Potentially set a flag here if you want to allow dragging to create new waypoints,
-      // but for now, dragging only moves existing ones.
     }
   };
 
   const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDragging || draggingWaypointIndex === null) return;
-
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas) return; // Ensure canvas is available
+
     const rect = canvas.getBoundingClientRect();
     const pixelX = e.clientX - rect.left;
     const pixelY = e.clientY - rect.top;
     const meterX = pixelsToMeters(pixelX);
     const meterY = pixelsToMeters(pixelY);
 
-    updateWaypointCoordinates(draggingWaypointIndex, meterX, meterY);
+    if (isMeasuring && measurePoints.length === 1) {
+      setMeasurePreviewPoint({ x: meterX, y: meterY });
+    } else if (measurePreviewPoint !== null) {
+      // If not in the specific state for live preview (isMeasuring=true and 1 point set),
+      // but a preview point exists, clear it.
+      // This handles cases like toggling off isMeasuring, or after the 2nd point is clicked.
+      setMeasurePreviewPoint(null);
+    }
+
+    // Waypoint dragging logic (should only run if not actively setting measurePreviewPoint, but isDragging is the primary guard)
+    if (isDragging && draggingWaypointIndex !== null) {
+      updateWaypointCoordinates(draggingWaypointIndex, meterX, meterY);
+    }
   };
 
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -858,7 +999,8 @@ const HolonomicPathOptimizer = () => {
       );
 
       // If mouse didn't move much and no waypoint was selected on mousedown (meaning click on empty space)
-      if (distDragged < 5 && selectedWaypoint === null) {
+      // AND not in measuring mode.
+      if (distDragged < 5 && selectedWaypoint === null && !isMeasuring) { 
         const meterX = pixelsToMeters(mouseDownPosition.x);
         const meterY = pixelsToMeters(mouseDownPosition.y);
         const isGuide = waypointCreationMode === 'guide';
@@ -1447,6 +1589,76 @@ const HolonomicPathOptimizer = () => {
 
   const totalPathTime = optimizedPath.length > 0 ? optimizedPath[optimizedPath.length - 1].time : 0;
 
+  // Added drag-and-drop handlers for waypoint reordering
+  const handleWaypointDragStart = (e: React.DragEvent<HTMLDivElement>, index: number) => {
+    setDraggedWaypointSourceIndex(index);
+    e.dataTransfer.effectAllowed = 'move';
+    // Minimal data transfer, actual data comes from state
+    e.dataTransfer.setData('text/plain', String(index));
+    // Optional: Add a class to the dragged item for styling
+    // e.currentTarget.classList.add('dragging-waypoint');
+  };
+
+  const handleWaypointDragOver = (e: React.DragEvent<HTMLDivElement>, targetIndex: number) => {
+    e.preventDefault(); // Necessary to allow dropping
+    // Optional: Add visual feedback for where the item will be dropped
+    // if (draggedWaypointSourceIndex !== null && draggedWaypointSourceIndex !== targetIndex) {
+    //   e.currentTarget.classList.add('waypoint-drop-target');
+    // }
+  };
+
+  const handleWaypointDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
+    // Optional: Remove visual feedback
+    // e.currentTarget.classList.remove('waypoint-drop-target');
+  };
+
+  const handleWaypointDrop = (e: React.DragEvent<HTMLDivElement>, targetIndex: number) => {
+    e.preventDefault();
+    // e.currentTarget.classList.remove('waypoint-drop-target');
+    if (draggedWaypointSourceIndex === null || draggedWaypointSourceIndex === targetIndex) {
+      setDraggedWaypointSourceIndex(null);
+      return;
+    }
+
+    setWaypoints(prevWaypoints => {
+      const newWaypoints = [...prevWaypoints];
+      const [draggedItem] = newWaypoints.splice(draggedWaypointSourceIndex, 1);
+      newWaypoints.splice(targetIndex, 0, draggedItem);
+
+      // Update selectedWaypoint index
+      if (selectedWaypoint === draggedWaypointSourceIndex) {
+        setSelectedWaypoint(targetIndex);
+      } else if (selectedWaypoint !== null) {
+        if (draggedWaypointSourceIndex < selectedWaypoint && targetIndex >= selectedWaypoint) {
+          setSelectedWaypoint(selectedWaypoint - 1);
+        } else if (draggedWaypointSourceIndex > selectedWaypoint && targetIndex <= selectedWaypoint) {
+          setSelectedWaypoint(selectedWaypoint + 1);
+        }
+      }
+      return newWaypoints;
+    });
+    setDraggedWaypointSourceIndex(null);
+  };
+
+  const handleWaypointDragEnd = () => {
+    setDraggedWaypointSourceIndex(null);
+  };
+
+  const toggleMeasureMode = () => {
+    setIsMeasuring(prevIsMeasuring => {
+      const nextIsMeasuring = !prevIsMeasuring;
+      // Always reset measurement state when toggling
+      setMeasurePoints([]);
+      setMeasuredDistance(null);
+      setMeasurePreviewPoint(null);
+      
+      if (nextIsMeasuring) { // Turning ON measuring mode
+        setSelectedWaypoint(null); // Deselect waypoints to avoid confusion
+      }
+      return nextIsMeasuring;
+    });
+  };
+
   return (
     <div className="w-full h-screen bg-background-primary flex text-text-primary font-sans overflow-hidden relative"> {/* Added relative for positioning context */}
       {/* Main Canvas Area */}
@@ -1503,6 +1715,13 @@ const HolonomicPathOptimizer = () => {
                   </button>
                 </div>
 
+                <button
+                  onClick={toggleMeasureMode}
+                  title={isMeasuring ? "Disable Measure Tool" : "Enable Measure Tool"}
+                  className={`p-2 rounded-lg hover:text-white transform hover:scale-105 shadow-md ${isMeasuring ? 'bg-accent-secondary text-white' : 'bg-background-tertiary text-text-secondary hover:bg-accent-primary'}`}
+                >
+                  <Ruler size={20} />
+                </button>
                 <button
                   onClick={() => setShowFloatingGraphs(true)}
                   title="Show Simulation Graphs"
@@ -1646,6 +1865,7 @@ const HolonomicPathOptimizer = () => {
           editorPosition={floatingGraphPosition}
           onDragStart={handleFloatingGraphMouseDown}
           isVisible={showFloatingGraphs}
+          currentTime={displayTime} // Pass displayTime here
       />
 
       {/* Sidebar */}
@@ -1682,6 +1902,30 @@ const HolonomicPathOptimizer = () => {
               <ConfigInput label="Max Angular Velocity" value={config.robot.maxAngularVelocity} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig(prev => ({ ...prev, robot: { ...prev.robot, maxAngularVelocity: parseFloat(e.target.value) } }))} unit="deg/s" className="mb-1" />
               <ConfigInput label="Max Angular Acceleration" value={config.robot.maxAngularAcceleration} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig(prev => ({ ...prev, robot: { ...prev.robot, maxAngularAcceleration: parseFloat(e.target.value) } }))} unit="deg/s²" className="mb-1" />
             </div>
+
+            {/* Path Config */}
+            <div className="space-y-2 pt-3 border-t border-border-color/50">
+              <h4 className="font-semibold text-text-secondary mt-2">Path Settings</h4>
+              <div className="flex items-center justify-between py-1">
+                <label htmlFor="splineType" className="text-sm text-text-secondary">Spline Type:</label>
+                <select 
+                  id="splineType"
+                  value={config.path.splineType}
+                  onChange={(e) => setConfig(prev => ({ ...prev, path: { ...prev.path, splineType: e.target.value as 'cubic' | 'quintic' } }))}
+                  className="bg-background-primary border border-border-color text-text-primary text-sm rounded-md focus:ring-accent-primary focus:border-accent-primary p-1.5 w-1/2 shadow-sm"
+                >
+                  <option value="cubic">Cubic</option>
+                  <option value="quintic">Quintic</option>
+                </select>
+              </div>
+              <ConfigInput label="Path Resolution" value={config.path.pathResolution} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig(prev => ({ ...prev, path: { ...prev.path, pathResolution: parseFloat(e.target.value) } }))} unit="m" className="mb-1" />
+              <ConfigInput label="Path Color" type="color" value={config.path.color} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig(prev => ({ ...prev, path: { ...prev.path, color: e.target.value } }))} className="mb-1" />
+              <ConfigInput label="Path Width" type="number" value={config.path.width} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig(prev => ({ ...prev, path: { ...prev.path, width: parseInt(e.target.value, 10) } }))} unit="px" className="mb-1" />
+              <div className="flex items-center justify-between py-1">
+                <label className="text-sm text-text-secondary">Velocity Visualization:</label>
+                <input type="checkbox" checked={config.path.velocityVisualization} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig(prev => ({ ...prev, path: { ...prev.path, velocityVisualization: e.target.checked } }))} className="mr-2 h-4 w-4 text-accent-primary rounded-sm focus:ring-accent-secondary bg-text-primary border-border-color" />
+              </div>
+            </div>
           </div>
 
         {/* Waypoint List Container */}
@@ -1702,12 +1946,25 @@ const HolonomicPathOptimizer = () => {
                   }
 
                   return (
-                    <div key={index} onClick={() => setSelectedWaypoint(index)} className={`p-3 rounded-lg cursor-pointer flex justify-between items-center group ${selectedWaypoint === index ? 'bg-gradient-accent text-white shadow-lg transform scale-105' : 'bg-background-primary text-text-primary hover:bg-accent-secondary hover:text-white hover:shadow-md'}`}>
-                        <div>
-                          <div className="font-medium">Waypoint {index + 1}</div>
-                          <div className="text-xs opacity-80">
-                            ({wp.x.toFixed(1)}, {wp.y.toFixed(1)}) • {velocityDisplay}
-                            {wp.heading !== undefined ? ` • ${wp.heading.toFixed(0)}°` : ''}
+                    <div 
+                      key={wp.x + '-' + wp.y + '-' + index} // More robust key for reordering
+                      draggable="true"
+                      onDragStart={(e) => handleWaypointDragStart(e, index)}
+                      onDragOver={(e) => handleWaypointDragOver(e, index)}
+                      onDragLeave={handleWaypointDragLeave}
+                      onDrop={(e) => handleWaypointDrop(e, index)}
+                      onDragEnd={handleWaypointDragEnd}
+                      onClick={() => setSelectedWaypoint(index)} 
+                      className={`p-3 rounded-lg cursor-grab flex justify-between items-center group relative ${selectedWaypoint === index ? 'bg-gradient-accent text-white shadow-lg transform scale-105' : 'bg-background-primary text-text-primary hover:bg-accent-secondary hover:text-white hover:shadow-md'} ${draggedWaypointSourceIndex === index ? 'opacity-50' : ''}`}
+                    >
+                        <div className="flex items-center">
+                          <GripVertical size={18} className="mr-2 text-text-tertiary group-hover:text-text-secondary cursor-grab" />
+                          <div>
+                            <div className="font-medium">Waypoint {index + 1}</div>
+                            <div className="text-xs opacity-80">
+                              ({wp.x.toFixed(1)}, {wp.y.toFixed(1)}) • {velocityDisplay}
+                              {wp.heading !== undefined ? ` • ${wp.heading.toFixed(0)}°` : ''}
+                            </div>
                           </div>
                         </div>
                         <button onClick={(e) => { e.stopPropagation(); deleteWaypoint(index); }} title="Delete Waypoint" className={`p-1 rounded-md transform group-hover:opacity-100 ${selectedWaypoint === index ? 'text-red-200 hover:text-white opacity-100' : 'text-red-400 hover:text-error-color opacity-0 group-hover:opacity-100'} hover:bg-background-secondary/50`}>

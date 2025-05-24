@@ -18,6 +18,7 @@ interface FloatingGraphPopupProps {
   editorPosition: { x: number; y: number };
   onDragStart: (e: React.MouseEvent<HTMLDivElement>) => void;
   isVisible: boolean;
+  currentTime: number;
 }
 
 const FloatingGraphPopup: React.FC<FloatingGraphPopupProps> = ({
@@ -26,6 +27,7 @@ const FloatingGraphPopup: React.FC<FloatingGraphPopupProps> = ({
   editorPosition,
   onDragStart,
   isVisible,
+  currentTime,
 }) => {
   const [showVelocityGraph, setShowVelocityGraph] = useState(true);
   const [showAccelerationGraph, setShowAccelerationGraph] = useState(true);
@@ -85,14 +87,14 @@ const FloatingGraphPopup: React.FC<FloatingGraphPopupProps> = ({
         {showVelocityGraph && (
           <div className="bg-background-primary/50 p-3 rounded-lg shadow-inner min-h-[200px]">
             <div className="relative h-[180px] sm:h-[200px]">
-                <VelocityTimeChart history={velocityHistory} />
+                <VelocityTimeChart history={velocityHistory} currentTime={currentTime} />
             </div>
           </div>
         )}
         {showAccelerationGraph && (
           <div className="bg-background-primary/50 p-3 rounded-lg shadow-inner min-h-[200px]">
              <div className="relative h-[180px] sm:h-[200px]">
-                <AccelerationTimeChart history={accelerationHistory} />
+                <AccelerationTimeChart history={accelerationHistory} currentTime={currentTime} />
             </div>
           </div>
         )}
