@@ -11,6 +11,7 @@ This application is a web-based tool for designing, optimizing, and simulating 2
     *   Drag existing waypoints to reposition them.
     *   Visual representation of the field, grid, waypoints, optimized path, and robot.
     *   Pan and Zoom (Implicit via browser, canvas resizes to available space).
+    *   **Measuring Tool:** Activate a ruler mode to click two points on the canvas and measure the distance between them, with live preview.
 *   **Waypoint Customization:**
     *   **Hard Waypoints:** The robot must pass through the center of these points.
     *   **Guide Waypoints:** The path will be "attracted" towards these points, but the robot does not need to pass directly through them.
@@ -36,11 +37,12 @@ This application is a web-based tool for designing, optimizing, and simulating 2
     *   Visual robot model follows the optimized path.
     *   Robot orientation interpolates between specified waypoint headings.
     *   Handles stopping at waypoints for the specified duration.
-    *   **Simulation Graphs:** View detailed graphs of:
-        *   Position (X, Y) vs. Time
-        *   Velocity vs. Time
-        *   Acceleration vs. Time
-        *   Heading vs. Time
+    *   **Simulation Time Slider:** A draggable slider appears below the canvas during simulation or when a path is present, allowing users to scrub through the simulation timeline. The robot's position on the canvas and the time indicator on graphs update accordingly.
+    *   **Floating Simulation Graphs:**
+        *   A draggable and closable window can be opened to display live simulation data.
+        *   Shows **Velocity vs. Time** and **Acceleration vs. Time** charts.
+        *   Individual chart visibility can be toggled.
+        *   A vertical line indicates the current simulation time, synchronized with the time slider and playback.
 *   **Configuration Panel (Sidebar):**
     *   **Field Settings:**
         *   Width & Height (meters)
@@ -58,6 +60,7 @@ This application is a web-based tool for designing, optimizing, and simulating 2
         *   Displays all current waypoints.
         *   Click to select and open the editor.
         *   Quick delete button for each waypoint.
+        *   **Drag-and-Drop Reordering:** Change the order of waypoints by dragging them within the list.
 *   **Path Management:**
     *   **Path Name:** Editable name for the current path.
     *   **Import/Export:** Save and load paths (including waypoints and configuration) as JSON files.
@@ -83,6 +86,7 @@ This application is a web-based tool for designing, optimizing, and simulating 2
     *   **`GuidePoint` (Guide):** The path will be influenced to pass near this point.
 *   **Adding Waypoints:** Click anywhere on the canvas to add a waypoint of the selected type at that location.
 *   **Moving Waypoints:** Click and drag an existing waypoint to change its position.
+*   **Reordering Waypoints:** In the **Waypoint List** (sidebar), click and drag a waypoint using the <kbd><GripVertical /> Grip</kbd> icon to change its order in the path.
 *   **Waypoint Counter:** The header displays the current number of waypoints (`<Target /> X Waypoints`).
 
 ### 3. Editing Waypoints
@@ -117,9 +121,29 @@ This application is a web-based tool for designing, optimizing, and simulating 2
     *   Click the <kbd><Play /> Play</kbd> icon in the header to start the simulation. The robot model will follow the path.
     *   Click the <kbd><Square /> Stop</kbd> icon (same button) to pause/end the simulation.
 *   **Simulation Speed:** Click the <kbd>1x</kbd> button (cycles through 1x, 2x, 4x) to change the playback speed.
-*   **Simulation Graphs:** Click the <kbd><BarChart2 /> Show Graphs</kbd> icon to open a modal displaying detailed plots of the robot's X/Y position, velocity, acceleration, and heading over time during the last simulation run.
+*   **Simulation Time Slider:**
+    *   When a path is generated, a time slider appears below the canvas.
+    *   Drag the slider handle to "scrub" through the path. The robot on the canvas and the time indicator on any open graphs will update to the selected time.
+    *   The slider also updates live during simulation playback.
+*   **Floating Simulation Graphs:**
+    *   Click the <kbd><BarChart2 /> Show Graphs</kbd> icon in the header to open the **Floating Graph Popup**.
+    *   This window is draggable and can be closed with its <kbd>X</kbd> button.
+    *   It displays **Velocity vs. Time** and **Acceleration vs. Time** charts for the last/current simulation.
+    *   Use the checkboxes within the popup to toggle the visibility of individual charts.
+    *   A vertical red dashed line on the charts indicates the current simulation time, synchronized with playback and the time slider.
 
-### 6. Managing Paths and Configuration
+### 6. Measuring Distances
+
+*   **Activate Ruler:** Click the <kbd><Ruler /> Measure</kbd> icon in the header. The button will highlight, indicating measuring mode is active.
+*   **First Point:** Click anywhere on the canvas to set the first measurement point. A crosshair will appear.
+*   **Second Point & Preview:** As you move the mouse, a dashed line will preview the measurement from the first point to your cursor, and the live distance will be displayed. Click again to set the second measurement point.
+*   **View Measurement:** Once two points are set, a solid line connects them, and the final measured distance is displayed on the canvas.
+*   **Reset/New Measurement:**
+    *   To start a new measurement, simply click again on the canvas; this will become the first point of the new measurement.
+    *   To exit measuring mode, click the <kbd><Ruler /> Measure</kbd> icon in the header again.
+*   **Styling:** Measured points are shown as orange crosshairs with numbers, the line is orange, and the distance text is light grey on a dark semi-transparent background.
+
+### 7. Managing Paths and Configuration
 
 *   **Path Name:** Click on "Steamplanner" (or the current path name) in the header to edit it.
 *   **Load Background Image:** Click the <kbd><Image /> Image</kbd> icon to upload an image file to use as the canvas background.
@@ -132,6 +156,7 @@ This application is a web-based tool for designing, optimizing, and simulating 2
     *   Displays key information: coordinates, velocity/stop status, heading.
     *   Click an item to select it and open its editor.
     *   Each item has a <kbd><Trash2 /> Trash</kbd> icon for quick deletion.
+    *   Drag waypoints using the <kbd><GripVertical /> Grip</kbd> icon to reorder them.
 
 ## Path Optimization and Physics
 
