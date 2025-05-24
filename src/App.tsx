@@ -994,7 +994,7 @@ const HolonomicPathOptimizer = () => {
       eventZones, 
       commandMarkers,
     editorMode, // Add editorMode as a dependency
-    canvasMousePosition, // Add canvasMousePosition as a dependency
+    currentMousePosition: canvasMousePosition, 
     });
   }, [
     config, 

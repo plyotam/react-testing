@@ -2,7 +2,6 @@
 import { Waypoint, Point, RobotState, OptimizedPathPoint, EventZone, CommandMarker } from '../../types';
 import { Config } from '../../config/appConfig';
 
-import { Point } from '../../types'; // Ensure Point is imported
 
 interface DrawCanvasArgs {
   canvas: HTMLCanvasElement;
