@@ -44,14 +44,13 @@ const HolonomicPathOptimizer = () => {
     },
     waypoint: {
       defaultRadius: 0.3, // meters
-      defaultVelocity: 2.0, // m/s
+      defaultTargetVelocity: 1.5, // m/s
+      defaultMaxVelocityConstraint: 2.0, // m/s
       minRadius: 0.1,
       maxRadius: 2.0,
-      minVelocity: 0.1,
-      maxVelocity: 4.0,
       defaultHeading: 0, // degrees
       stopAtWaypoint: false,
-      stopDuration: 1.0 // seconds, new default for how long to pause at a stop waypoint
+      defaultStopDuration: 1.0, // seconds, NEW default for per-waypoint stop, if stopAtWaypoint is true
     },
     path: {
       splineType: 'cubic', // 'cubic', 'quintic'
@@ -94,7 +93,7 @@ const HolonomicPathOptimizer = () => {
   }>({ 
     x: 1, y: 1, rotation: 0, velocity: 0, angularVelocity: 0 
   });
-  const [showConfig, setShowConfig] = useState(false);
+  const [showConfig, setShowConfig] = useState(true);
   const [pathName, setPathName] = useState('Steamplanner');
   const [backgroundImage, setBackgroundImage] = useState<HTMLImageElement | null>(null);
   const [optimizationMetrics, setOptimizationMetrics] = useState<{
@@ -173,148 +172,240 @@ const HolonomicPathOptimizer = () => {
       energyConsumption: 0
     };
     
-    // Calculate cumulative distances
-    const distances = [0];
+    // Calculate cumulative distances (s_coords for splines)
+    const s_coords = [0];
     for (let i = 1; i < waypoints.length; i++) {
       const dx = waypoints[i].x - waypoints[i-1].x;
       const dy = waypoints[i].y - waypoints[i-1].y;
-      const dist = Math.sqrt(dx*dx + dy*dy);
-      distances.push(distances[distances.length - 1] + dist);
+      s_coords.push(s_coords[s_coords.length - 1] + Math.sqrt(dx*dx + dy*dy));
     }
     
-    // Create splines for x and y coordinates
     let xSpline, ySpline;
+    const waypointXCoords = waypoints.map(wp => wp.x);
+    const waypointYCoords = waypoints.map(wp => wp.y);
+
     if (config.path.splineType === 'quintic') {
-      xSpline = new QuinticSpline(distances, waypoints.map(wp => wp.x));
-      ySpline = new QuinticSpline(distances, waypoints.map(wp => wp.y));
-    } else { // Default to cubic
-      xSpline = new CubicSpline(distances, waypoints.map(wp => wp.x));
-      ySpline = new CubicSpline(distances, waypoints.map(wp => wp.y));
+      xSpline = new QuinticSpline(s_coords, waypointXCoords);
+      ySpline = new QuinticSpline(s_coords, waypointYCoords);
+    } else {
+      xSpline = new CubicSpline(s_coords, waypointXCoords);
+      ySpline = new CubicSpline(s_coords, waypointYCoords);
     }
     
-    const totalDistance = distances[distances.length - 1];
+    const totalDistance = s_coords[s_coords.length - 1];
     metrics.totalDistance = totalDistance;
     
-    // Generate path points with physics-based velocity profile
     const pathResolution = config.path.pathResolution;
-    const numPoints = Math.ceil(totalDistance / pathResolution);
+    const numPoints = totalDistance > 0 ? Math.ceil(totalDistance / pathResolution) : 0;
     
     let accumulatedTime = 0;
 
-    for (let i = 0; i <= numPoints; i++) {
+    // Generate first point (s=0)
+    if (numPoints >= 0) { // Should always be true if totalDistance >= 0
+      const s0 = 0;
+      const x0 = xSpline.interpolate(s0);
+      const y0 = ySpline.interpolate(s0);
+      const dx_ds0 = xSpline.derivative(s0);
+      const dy_ds0 = ySpline.derivative(s0);
+      const d2x_ds2_0 = xSpline.secondDerivative(s0);
+      const d2y_ds2_0 = ySpline.secondDerivative(s0);
+      const cNum0 = dx_ds0 * d2y_ds2_0 - dy_ds0 * d2x_ds2_0;
+      const cDen0 = Math.pow(dx_ds0**2 + dy_ds0**2, 1.5);
+      const curvature0 = cDen0 < 1e-6 ? 0 : Math.abs(cNum0) / cDen0;
+      const heading0 = Math.atan2(dy_ds0, dx_ds0) * 180 / Math.PI;
+
+      let v0 = config.robot.maxVelocity;
+      if (curvature0 > 0.001) {
+        v0 = Math.min(v0, Math.sqrt(config.robot.maxAcceleration / curvature0));
+      }
+
+      if (waypoints.length > 0) { // Check if waypoints exist before accessing waypoints[0]
+        const firstWaypoint = waypoints[0];
+        const distToFirstWp = Math.sqrt((x0 - firstWaypoint.x)**2 + (y0 - firstWaypoint.y)**2);
+
+        if (distToFirstWp < firstWaypoint.radius) { // Only apply waypoint constraints if s=0 is within its radius
+          if (firstWaypoint.stopAtWaypoint) {
+            const criticalStopDist = config.path.pathResolution * 2.0; // Increased critical distance
+            if (distToFirstWp < criticalStopDist) {
+              v0 = 0.0; // Force stop if critically close
+            } else {
+              const distTarget = Math.max(0, distToFirstWp - 0.01); // Aim to stop slightly before center
+              const decelToStopV = Math.sqrt(2 * config.robot.maxAcceleration * distTarget);
+              v0 = Math.min(v0, decelToStopV);
+            }
+          } else {
+            let wpMax = v0; // Start with curvature-limited/robot max velocity
+            if (firstWaypoint.maxVelocityConstraint !== undefined) {
+              wpMax = Math.min(wpMax, firstWaypoint.maxVelocityConstraint);
+            }
+            if (firstWaypoint.targetVelocity !== undefined) {
+              v0 = Math.min(wpMax, firstWaypoint.targetVelocity);
+            } else {
+              v0 = wpMax; // Use the constrained max if no target
+            }
+          }
+        }
+      }
+      v0 = Math.max(0, v0); 
+
+      path.push({ x: x0, y: y0, s: s0, velocity: v0, acceleration: 0, curvature: curvature0, heading: heading0, time: 0 });
+      metrics.maxCurvature = Math.max(metrics.maxCurvature, curvature0);
+    }
+
+    for (let i = 1; i <= numPoints; i++) {
       const s = (i / numPoints) * totalDistance;
       const x = xSpline.interpolate(s);
       const y = ySpline.interpolate(s);
-      
-      // Calculate derivatives for curvature and heading
       const dx_ds = xSpline.derivative(s);
       const dy_ds = ySpline.derivative(s);
       const d2x_ds2 = xSpline.secondDerivative(s);
       const d2y_ds2 = ySpline.secondDerivative(s);
-      
-      // Calculate curvature κ = |x'y'' - y'x''| / (x'² + y'²)^(3/2)
-      const curvature = Math.abs(dx_ds * d2y_ds2 - dy_ds * d2x_ds2) / 
-                       Math.pow(dx_ds * dx_ds + dy_ds * dy_ds, 1.5);
-      
+      const curvatureNumerator = dx_ds * d2y_ds2 - dy_ds * d2x_ds2;
+      const curvatureDenominator = Math.pow(dx_ds * dx_ds + dy_ds * dy_ds, 1.5);
+      const curvature = curvatureDenominator < 1e-6 ? 0 : Math.abs(curvatureNumerator) / curvatureDenominator;
       metrics.maxCurvature = Math.max(metrics.maxCurvature, curvature);
-      
-      // Calculate heading
       const heading = Math.atan2(dy_ds, dx_ds) * 180 / Math.PI;
-      
-      // Find nearest waypoint for velocity constraints
+
       let nearestWaypointIndex = 0;
       let minDistToWaypoint = Infinity;
       for (let j = 0; j < waypoints.length; j++) {
-        const distToWp = Math.sqrt((x - waypoints[j].x)**2 + (y - waypoints[j].y)**2);
-        if (distToWp < minDistToWaypoint) {
-          minDistToWaypoint = distToWp;
+        const distSq = (x - waypoints[j].x)**2 + (y - waypoints[j].y)**2;
+        if (distSq < minDistToWaypoint**2) {
+          minDistToWaypoint = Math.sqrt(distSq);
           nearestWaypointIndex = j;
         }
       }
-      
-      // Physics-based velocity calculation
-      let maxVelocityAtPoint = config.robot.maxVelocity;
-      
-      // Curvature-limited velocity: v = sqrt(a_max / κ)
-      if (curvature > 0.001) {
-        const curvatureVelocity = Math.sqrt(config.robot.maxAcceleration / curvature);
-        maxVelocityAtPoint = Math.min(maxVelocityAtPoint, curvatureVelocity);
-      }
-      
-      // Waypoint velocity constraints
       const nearestWaypoint = waypoints[nearestWaypointIndex];
-      if (minDistToWaypoint < nearestWaypoint.radius) {
-        if (nearestWaypoint.stopAtWaypoint) {
-          maxVelocityAtPoint = 0;
+
+      // Step 1: Preemptive Hard Stop Check
+      // Ensure the hard stop is generated within a zone the simulation will also recognize.
+      const simNearDist = nearestWaypoint.radius * 0.70; // Simulation checks < wp.radius * 0.75
+      const pathGenStopDist = config.path.pathResolution * 2.0;
+      const effectiveStopDist = Math.min(simNearDist, pathGenStopDist);
+
+      const isHardStopPoint = 
+        nearestWaypoint.stopAtWaypoint &&
+        minDistToWaypoint < effectiveStopDist;
+
+      let v_achieved;
+      let currentAcceleration;
+      let segmentTime;
+
+      const prevPoint = path[path.length - 1];
+      const v_prev = prevPoint.velocity;
+      const segmentDx = x - prevPoint.x;
+      const segmentDy = y - prevPoint.y;
+      const d_s = Math.sqrt(segmentDx**2 + segmentDy**2);
+
+      if (isHardStopPoint) {
+        v_achieved = 0.0;
+        // Acceleration and time to achieve this hard stop from v_prev over d_s
+        if (d_s < 1e-6) { // No distance to change velocity
+            currentAcceleration = 0;
+            // If v_prev was also 0, time is arbitrary small, else if v_prev non-zero, means infinite accel (will be clamped)
+            segmentTime = 0.001; 
         } else {
-          maxVelocityAtPoint = Math.min(maxVelocityAtPoint, nearestWaypoint.velocity);
+            // a = (v_f^2 - v_i^2) / (2d)
+            currentAcceleration = (v_achieved**2 - v_prev**2) / (2 * d_s);
+        }
+      } else {
+        // Not a hard stop point, calculate kinematically
+        let targetVelocityForKinematics = config.robot.maxVelocity;
+        if (curvature > 0.001) {
+          targetVelocityForKinematics = Math.min(targetVelocityForKinematics, Math.sqrt(config.robot.maxAcceleration / curvature));
+        }
+
+        if (nearestWaypoint.stopAtWaypoint) {
+          // For stop waypoints, calculate a zone of influence for deceleration.
+          const requiredStoppingDistance = (v_prev > 0.1) ? (v_prev * v_prev) / (2 * config.robot.maxAcceleration) : 0; // Dist needed to stop from v_prev
+          const adaptiveLookahead = Math.min(requiredStoppingDistance * 1.5, config.robot.maxVelocity * 1.0);
+          const stopInfluenceZone = Math.max(nearestWaypoint.radius, adaptiveLookahead);
+
+          if (minDistToWaypoint < stopInfluenceZone) { // Apply this decel logic only if within the broader influence zone
+            // Calculate the distance from the current point to the edge of the "hard stop" zone.
+            // effectiveStopDist is defined near the start of the loop for isHardStopPoint check.
+            const distanceToHardStopEdge = Math.max(0, minDistToWaypoint - effectiveStopDist);
+            
+            // Calculate the velocity the robot should have at the current point
+            // to be able to decelerate to zero by the time it reaches the hard stop zone's edge.
+            const velocityToNaturallyStopAtHardStopEdge = Math.sqrt(2 * config.robot.maxAcceleration * distanceToHardStopEdge);
+            
+            targetVelocityForKinematics = Math.min(targetVelocityForKinematics, velocityToNaturallyStopAtHardStopEdge);
+          }
+        } else { // It's a non-stop waypoint
+          if (minDistToWaypoint < nearestWaypoint.radius) { // Apply constraints only if within the waypoint's radius
+            if (nearestWaypoint.maxVelocityConstraint !== undefined) {
+              targetVelocityForKinematics = Math.min(targetVelocityForKinematics, nearestWaypoint.maxVelocityConstraint);
+            }
+            if (nearestWaypoint.targetVelocity !== undefined) {
+              targetVelocityForKinematics = Math.min(targetVelocityForKinematics, nearestWaypoint.targetVelocity);
+            }
+          }
+        }
+        targetVelocityForKinematics = Math.max(0, targetVelocityForKinematics);
+
+        if (d_s < 1e-6) {
+          v_achieved = v_prev;
+          currentAcceleration = 0;
+        } else {
+          if (targetVelocityForKinematics >= v_prev) {
+            const v_if_full_accel = Math.sqrt(v_prev**2 + 2 * config.robot.maxAcceleration * d_s);
+            v_achieved = Math.min(targetVelocityForKinematics, v_if_full_accel);
+          } else {
+            const v_if_full_decel_sq = v_prev**2 - 2 * config.robot.maxAcceleration * d_s;
+            const v_if_full_decel = v_if_full_decel_sq > 0 ? Math.sqrt(v_if_full_decel_sq) : 0;
+            v_achieved = Math.max(targetVelocityForKinematics, v_if_full_decel);
+          }
+          // Recalculate acceleration based on v_achieved
+          currentAcceleration = (v_achieved**2 - v_prev**2) / (2*d_s);
         }
       }
       
-      let calculatedAcceleration = 0; // Renamed to avoid conflict with path point field
-      let segmentTime = 0;
+      // Clamp acceleration for all cases (hard stop or kinematic)
+      currentAcceleration = Math.max(-config.robot.maxAcceleration, Math.min(config.robot.maxAcceleration, currentAcceleration));
+      metrics.maxAcceleration = Math.max(metrics.maxAcceleration, Math.abs(currentAcceleration));
 
-      if (path.length > 0) { // If not the first point
-        const prevPoint = path[path.length - 1];
-        const prevVelocity = prevPoint.velocity;
-        const sumOfVelocities = prevVelocity + maxVelocityAtPoint;
-
-        if (Math.abs(sumOfVelocities) < 0.002) { // If sum is very small (average velocity is < 0.001 m/s)
-          segmentTime = 0.01; // Assign a small, fixed time step to prevent division by zero/tiny number.
-                                // This covers (0,0) or (v_small, -v_small_opposite) cases.
-          if (segmentTime > 0.0001 && Math.abs(maxVelocityAtPoint - prevVelocity) > 0.0001) {
-             calculatedAcceleration = (maxVelocityAtPoint - prevVelocity) / segmentTime;
-          } else {
-             calculatedAcceleration = 0; // No significant velocity change or time step too small for meaningful accel.
-          }
-        } else { // Sum of velocities is not negligible
-          segmentTime = (2 * pathResolution) / sumOfVelocities; 
-          // Ensure segmentTime is positive. If sumOfVelocities is negative (moving backward overall for segment),
-          // time should still be positive. The path generator should ideally ensure velocities for forward motion.
-          if (segmentTime < 0) {
-            // This case implies prevVelocity and maxVelocityAtPoint are such that their sum is negative,
-            // and pathResolution is positive. E.g. prevV=-1, maxV=-1. sum=-2. time = 2*0.05 / -2 = -0.05.
-            // This means robot is moving backward. Time should be positive. Accel direction will be handled by (Vf-Vi).
-            segmentTime = Math.abs(segmentTime);
-            // If segmentTime became 0 due to pathResolution being 0 (not expected), handle it.
-            if (segmentTime < 0.0001) segmentTime = 0.01;
-          }
-
-          if (segmentTime > 0.0001) { // Avoid division by zero if segmentTime is effectively zero
-            calculatedAcceleration = (maxVelocityAtPoint - prevVelocity) / segmentTime;
-          } else if (Math.abs(maxVelocityAtPoint - prevVelocity) < 0.001) {
-            calculatedAcceleration = 0; // No change in velocity, segmentTime is zero
-          } else {
-            // Velocity changed with (near) zero time -> infinite acceleration, so clamp
-            calculatedAcceleration = (maxVelocityAtPoint > prevVelocity ? 1 : -1) * config.robot.maxAcceleration;
-            if(segmentTime <= 0.0001) segmentTime = 0.01; // ensure some time passes if accel occurs
-          }
-        }
-        
-        // Clamp acceleration
-        calculatedAcceleration = Math.max(-config.robot.maxAcceleration, 
-                               Math.min(config.robot.maxAcceleration, calculatedAcceleration));
-        metrics.maxAcceleration = Math.max(metrics.maxAcceleration, Math.abs(calculatedAcceleration));
-      } else { // First point in the path
-        segmentTime = 0; // No time elapsed to reach the first point itself from a conceptual previous one.
-        calculatedAcceleration = 0; // Assume it starts with the first waypoint's velocity, or from rest.
-                                    // If first waypoint has vel > 0, path implicitly starts there.
+      // Calculate segmentTime for all cases
+      if (d_s < 1e-6) { // Points effectively coincident
+          segmentTime = 0.001; // Minimal time
+      } else if (Math.abs(currentAcceleration) > 1e-4) { // Normal case: accelerate/decelerate
+        segmentTime = (v_achieved - v_prev) / currentAcceleration;
+      } else if (Math.abs(v_achieved - v_prev) < 1e-4 && (v_achieved + v_prev > 1e-4)) { // Constant non-zero speed (or negligible change at non-zero speed)
+         segmentTime = (2 * d_s) / (v_achieved + v_prev);
+      } else if (Math.abs(v_achieved) < 1e-3 && Math.abs(v_prev) < 1e-3) { // Both current and previous points are effectively stopped
+         segmentTime = 0.02; // Small fixed time for a "stopped" segment, prevents huge times if d_s is pathResolution
+      } else { // Fallback for other near-zero velocity/acceleration cases. 
+               // E.g. v_prev is non-zero, v_achieved is zero (hard stop), but accel calc was already ~0 (implies v_prev was already ~0).
+               // Or v_prev is zero, v_achieved is non-zero, but accel calc was ~0 (should not happen if d_s > 0).
+        segmentTime = 0.02; // Default to a small fixed time if in an ambiguous low-speed, low-accel state.
       }
       
+      // Cleanup segmentTime
+      if (segmentTime <= 1e-5 && d_s > 1e-6) { // Prevent extremely small/zero time if distance was covered
+          segmentTime = 1e-5; 
+          if (Math.abs(v_achieved - v_prev) > 1e-4) {
+            currentAcceleration = (v_achieved - v_prev) / segmentTime;
+            currentAcceleration = Math.max(-config.robot.maxAcceleration, Math.min(config.robot.maxAcceleration, currentAcceleration));
+          } else {
+            currentAcceleration = 0;
+            // v_achieved = v_prev; // Velocity wouldn't change if no accel over forced tiny time
+          }
+      }
+      // Ensure time is not negative if velocities cause issues with (vf-vi)/a calculation
+      if (segmentTime < 0) segmentTime = Math.abs(segmentTime);
+
+
       accumulatedTime += segmentTime;
-
-      // Energy consumption estimation (simplified)
-      const avgVelocityForEnergy = (maxVelocityAtPoint + (path.length > 0 ? path[path.length-1].velocity : maxVelocityAtPoint))/2;
-      const power = config.robot.mass * Math.abs(calculatedAcceleration) * Math.abs(avgVelocityForEnergy) + 
-                   0.5 * config.physics.frictionCoefficient * config.robot.mass * 9.81 * Math.abs(avgVelocityForEnergy);
-      if (segmentTime > 0.0001) { // Only add energy if a meaningful time has passed
-          metrics.energyConsumption += Math.abs(power) * segmentTime;
-      }
       
+      const avgVelForEnergy = (v_achieved + v_prev) / 2;
+      const power = config.robot.mass * Math.abs(currentAcceleration) * Math.abs(avgVelForEnergy) + 
+                   0.5 * config.physics.frictionCoefficient * config.robot.mass * 9.81 * Math.abs(avgVelForEnergy);
+      if (segmentTime > 1e-5) metrics.energyConsumption += Math.abs(power) * segmentTime;
+
       path.push({
         x, y, s,
-        velocity: maxVelocityAtPoint,
-        acceleration: calculatedAcceleration, // Use the correctly scoped and calculated variable
+        velocity: v_achieved,
+        acceleration: currentAcceleration,
         curvature,
         heading,
         time: accumulatedTime
@@ -508,7 +599,7 @@ const HolonomicPathOptimizer = () => {
         ctx.stroke();
       }
       
-      // Draw waypoint label with velocity
+      // Draw waypoint label with velocity/status
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 12px sans-serif';
       ctx.textAlign = 'center';
@@ -518,8 +609,22 @@ const HolonomicPathOptimizer = () => {
       ctx.fillText(`${index + 1}`, pixelX, pixelY - pixelRadius - 15);
       
       ctx.font = '10px sans-serif';
-      ctx.strokeText(`${waypoint.velocity.toFixed(1)}m/s`, pixelX, pixelY - pixelRadius - 5);
-      ctx.fillText(`${waypoint.velocity.toFixed(1)}m/s`, pixelX, pixelY - pixelRadius - 5);
+      let velocityStatusText = "Path Optimized";
+      if (waypoint.stopAtWaypoint) {
+        const duration = waypoint.stopDuration !== undefined ? waypoint.stopDuration : config.waypoint.defaultStopDuration;
+        velocityStatusText = `STOP (${duration.toFixed(1)}s)`;
+      } else if (waypoint.targetVelocity !== undefined) {
+        velocityStatusText = `T: ${waypoint.targetVelocity.toFixed(1)}m/s`;
+        if (waypoint.maxVelocityConstraint !== undefined) {
+          velocityStatusText += ` M: ${waypoint.maxVelocityConstraint.toFixed(1)}m/s`;
+        }
+      } else if (waypoint.maxVelocityConstraint !== undefined) {
+        velocityStatusText = `Max: ${waypoint.maxVelocityConstraint.toFixed(1)}m/s`;
+      }
+      // else it remains "Path Optimized" or could be an empty string if preferred
+
+      ctx.strokeText(velocityStatusText, pixelX, pixelY - pixelRadius - 5);
+      ctx.fillText(velocityStatusText, pixelX, pixelY - pixelRadius - 5);
     });
     
     // Draw robot
@@ -588,13 +693,14 @@ const HolonomicPathOptimizer = () => {
       setSelectedWaypoint(clickedWaypoint);
     } else {
       // Add new waypoint
-      const newWaypoint: Waypoint = { // Explicitly type newWaypoint
+      const newWaypoint: Waypoint = {
         x,
         y,
         radius: config.waypoint.defaultRadius,
-        velocity: config.waypoint.defaultVelocity,
+        targetVelocity: config.waypoint.defaultTargetVelocity,
         heading: config.waypoint.defaultHeading,
-        stopAtWaypoint: config.waypoint.stopAtWaypoint
+        stopAtWaypoint: config.waypoint.stopAtWaypoint,
+        stopDuration: config.waypoint.stopAtWaypoint ? config.waypoint.defaultStopDuration : undefined,
       };
       setWaypoints([...waypoints, newWaypoint]);
       setSelectedWaypoint(waypoints.length);
@@ -939,8 +1045,12 @@ const HolonomicPathOptimizer = () => {
         };
         setSimulationHistory(prevHistory => addDataPointToHistory(prevHistory, stopDataPoint));
         
+        const stopDurationToUse = actualStopWaypointData.stopDuration !== undefined 
+                                  ? actualStopWaypointData.stopDuration 
+                                  : config.waypoint.defaultStopDuration; // Fallback to global default
+
         const stopWpIndex = waypoints.indexOf(actualStopWaypointData) + 1;
-        showMessage('info', `Stopping at Waypoint ${stopWpIndex} for ${config.waypoint.stopDuration.toFixed(1)}s`);
+        showMessage('info', `Stopping at Waypoint ${stopWpIndex} for ${stopDurationToUse.toFixed(1)}s`);
         isPausedForStopPointRef.current = true;
         setTimeout(() => {
           isPausedForStopPointRef.current = false; 
@@ -948,7 +1058,7 @@ const HolonomicPathOptimizer = () => {
           if (isPlaying) { 
             animationFrameIdRef.current = requestAnimationFrame(simulationStep);
           }
-        }, config.waypoint.stopDuration * 1000);
+        }, stopDurationToUse * 1000);
         return; 
       }
 
@@ -978,7 +1088,7 @@ const HolonomicPathOptimizer = () => {
       }
       lastTimestampRef.current = null; 
     };
-  }, [isPlaying, optimizedPath, waypoints, config.waypoint.stopDuration, simulationSpeedFactor, showMessage, interpolateAngleDeg, robotState.rotation, waypointSHeadings, config.robot.maxAcceleration]); // Added missing dependencies
+  }, [isPlaying, optimizedPath, waypoints, config.waypoint.defaultStopDuration, simulationSpeedFactor, showMessage, interpolateAngleDeg, robotState.rotation, waypointSHeadings, config.robot.maxAcceleration]); // Added missing dependencies
 
   // Helper function to add data points to history without duplicates by time
   const addDataPointToHistory = (history: SimulationDataPoint[], newDataPoint: SimulationDataPoint): SimulationDataPoint[] => {
@@ -1228,10 +1338,29 @@ const HolonomicPathOptimizer = () => {
                 <label className="block text-sm font-medium mb-1 text-text-secondary">Radius: {waypoints[selectedWaypoint].radius.toFixed(2)}m</label>
                 <input type="range" min={config.waypoint.minRadius} max={config.waypoint.maxRadius} step="0.1" value={waypoints[selectedWaypoint].radius} onChange={(e) => updateWaypoint('radius', parseFloat(e.target.value))} className="w-full h-3 bg-background-primary rounded-lg appearance-none cursor-pointer accent-accent-primary" />
               </div>
+
+              {/* New Velocity Inputs */}
               <div>
-                <label className="block text-sm font-medium mb-1 text-text-secondary">Velocity: {waypoints[selectedWaypoint].velocity.toFixed(1)} m/s</label>
-                <input type="range" min={config.waypoint.minVelocity} max={config.waypoint.maxVelocity} step="0.1" value={waypoints[selectedWaypoint].velocity} onChange={(e) => updateWaypoint('velocity', parseFloat(e.target.value))} className="w-full h-3 bg-background-primary rounded-lg appearance-none cursor-pointer accent-accent-primary" />
+                <label className="block text-sm font-medium mb-1 text-text-secondary">Target Velocity (m/s)</label>
+                <input 
+                  type="number" step="0.1" 
+                  value={waypoints[selectedWaypoint].targetVelocity !== undefined ? waypoints[selectedWaypoint].targetVelocity!.toFixed(1) : ''} 
+                  onChange={(e) => updateWaypoint('targetVelocity', e.target.value ? parseFloat(e.target.value) : undefined)} 
+                  className="w-full px-3 py-2 border border-border-color/50 rounded-md text-sm bg-background-primary text-text-primary placeholder:text-text-secondary focus:ring-1 focus:ring-accent-primary focus:border-accent-primary outline-none"
+                  placeholder="Optional (e.g., 1.5)"
+                />
               </div>
+              <div>
+                <label className="block text-sm font-medium mb-1 text-text-secondary">Max Velocity Constraint (m/s)</label>
+                <input 
+                  type="number" step="0.1" 
+                  value={waypoints[selectedWaypoint].maxVelocityConstraint !== undefined ? waypoints[selectedWaypoint].maxVelocityConstraint!.toFixed(1) : ''} 
+                  onChange={(e) => updateWaypoint('maxVelocityConstraint', e.target.value ? parseFloat(e.target.value) : undefined)} 
+                  className="w-full px-3 py-2 border border-border-color/50 rounded-md text-sm bg-background-primary text-text-primary placeholder:text-text-secondary focus:ring-1 focus:ring-accent-primary focus:border-accent-primary outline-none"
+                  placeholder={`Optional (e.g., ${config.robot.maxVelocity.toFixed(1)})`}
+                />
+              </div>
+
               <div>
                 <label className="block text-sm font-medium mb-1 text-text-secondary">Target Heading (°)</label>
                 <div className="flex gap-2">
@@ -1241,10 +1370,31 @@ const HolonomicPathOptimizer = () => {
               </div>
               <div>
                 <label className="flex items-center text-sm font-medium text-text-secondary">
-                  <input type="checkbox" checked={waypoints[selectedWaypoint].stopAtWaypoint || false} onChange={(e) => updateWaypoint('stopAtWaypoint', e.target.checked)} className="mr-2 h-4 w-4 text-accent-primary rounded-sm focus:ring-accent-secondary bg-background-primary border-border-color/50" />
+                  <input type="checkbox" checked={waypoints[selectedWaypoint].stopAtWaypoint || false} onChange={(e) => {
+                    const checked = e.target.checked;
+                    updateWaypoint('stopAtWaypoint', checked);
+                    if (checked && waypoints[selectedWaypoint].stopDuration === undefined) {
+                      updateWaypoint('stopDuration', config.waypoint.defaultStopDuration);
+                    } else if (!checked) {
+                      // Optionally clear stopDuration when unchecked
+                      // updateWaypoint('stopDuration', undefined); 
+                    }
+                  }} className="mr-2 h-4 w-4 text-accent-primary rounded-sm focus:ring-accent-secondary bg-background-primary border-border-color/50" />
                   Stop at Waypoint
                 </label>
               </div>
+
+              {waypoints[selectedWaypoint].stopAtWaypoint && (
+                <div>
+                  <label className="block text-sm font-medium mb-1 text-text-secondary">Stop Duration (s)</label>
+                  <input 
+                    type="number" step="0.1" min="0" 
+                    value={waypoints[selectedWaypoint].stopDuration !== undefined ? waypoints[selectedWaypoint].stopDuration!.toFixed(1) : config.waypoint.defaultStopDuration.toFixed(1)} 
+                    onChange={(e) => updateWaypoint('stopDuration', e.target.value ? parseFloat(e.target.value) : config.waypoint.defaultStopDuration)} 
+                    className="w-full px-3 py-2 border border-border-color/50 rounded-md text-sm bg-background-primary text-text-primary placeholder:text-text-secondary focus:ring-1 focus:ring-accent-primary focus:border-accent-primary outline-none" 
+                  />
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-text-secondary text-sm">Click on a waypoint or canvas to select/add.</p>
@@ -1255,17 +1405,34 @@ const HolonomicPathOptimizer = () => {
         <div className="bg-background-tertiary/50 rounded-xl shadow-lg p-5 backdrop-blur-sm">
             <h3 className="font-bold text-lg mb-4 text-accent-primary">Waypoint List</h3>
             <div className="space-y-2 max-h-60 overflow-y-auto pr-2">
-                {waypoints.map((wp, index) => (
-                <div key={index} onClick={() => setSelectedWaypoint(index)} className={`p-3 rounded-lg cursor-pointer flex justify-between items-center group ${selectedWaypoint === index ? 'bg-gradient-accent text-white shadow-lg transform scale-105' : 'bg-background-primary text-text-primary hover:bg-accent-secondary hover:text-white hover:shadow-md'}`}>
-                    <div>
-                      <div className="font-medium">Waypoint {index + 1}</div>
-                      <div className="text-xs opacity-80"> ({wp.x.toFixed(1)}, {wp.y.toFixed(1)}) • {wp.velocity.toFixed(1)} m/s {wp.heading !== undefined ? ` • ${wp.heading.toFixed(0)}°` : ''} {wp.stopAtWaypoint && <span className="font-bold"> • STOP</span>} </div>
+                {waypoints.map((wp, index) => {
+                  let velocityDisplay = "Path Optimized";
+                  if (wp.stopAtWaypoint) {
+                    velocityDisplay = `STOP (${(wp.stopDuration !== undefined ? wp.stopDuration : config.waypoint.defaultStopDuration).toFixed(1)}s)`;
+                  } else if (wp.targetVelocity !== undefined) {
+                    velocityDisplay = `T: ${wp.targetVelocity.toFixed(1)} m/s`;
+                    if (wp.maxVelocityConstraint !== undefined) {
+                      velocityDisplay += ` M: ${wp.maxVelocityConstraint.toFixed(1)} m/s`;
+                    }
+                  } else if (wp.maxVelocityConstraint !== undefined) {
+                    velocityDisplay = `Max: ${wp.maxVelocityConstraint.toFixed(1)} m/s`;
+                  }
+
+                  return (
+                    <div key={index} onClick={() => setSelectedWaypoint(index)} className={`p-3 rounded-lg cursor-pointer flex justify-between items-center group ${selectedWaypoint === index ? 'bg-gradient-accent text-white shadow-lg transform scale-105' : 'bg-background-primary text-text-primary hover:bg-accent-secondary hover:text-white hover:shadow-md'}`}>
+                        <div>
+                          <div className="font-medium">Waypoint {index + 1}</div>
+                          <div className="text-xs opacity-80">
+                            ({wp.x.toFixed(1)}, {wp.y.toFixed(1)}) • {velocityDisplay}
+                            {wp.heading !== undefined ? ` • ${wp.heading.toFixed(0)}°` : ''}
+                          </div>
+                        </div>
+                        <button onClick={(e) => { e.stopPropagation(); deleteWaypoint(index); }} title="Delete Waypoint" className={`p-1 rounded-md transform group-hover:opacity-100 ${selectedWaypoint === index ? 'text-red-200 hover:text-white opacity-100' : 'text-red-400 hover:text-error-color opacity-0 group-hover:opacity-100'} hover:bg-background-secondary/50`}>
+                          <Trash2 size={14} />
+                        </button>
                     </div>
-                    <button onClick={(e) => { e.stopPropagation(); deleteWaypoint(index); }} title="Delete Waypoint" className={`p-1 rounded-md transform group-hover:opacity-100 ${selectedWaypoint === index ? 'text-red-200 hover:text-white opacity-100' : 'text-red-400 hover:text-error-color opacity-0 group-hover:opacity-100'} hover:bg-background-secondary/50`}>
-                      <Trash2 size={14} />
-                    </button>
-                </div>
-                ))}
+                  );
+                })}
                 {waypoints.length === 0 && (
                     <p className="text-text-secondary text-sm text-center py-4">No waypoints added yet.</p>
                 )}
