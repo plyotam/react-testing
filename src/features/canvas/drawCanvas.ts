@@ -26,7 +26,7 @@ function hexToRgba(hex: string, alpha: number = 1): string {
 }
 
 
-import { Point } from '../../types'; // Ensure Point is imported
+// import { Point } from '../../types'; // Ensure Point is imported // REMOVED DUPLICATE
 
 interface DrawCanvasArgs {
   canvas: HTMLCanvasElement;
@@ -45,7 +45,7 @@ interface DrawCanvasArgs {
   eventZones: EventZone[];
   commandMarkers: CommandMarker[];
   editorMode: 'waypoints' | 'addEventZoneCenter' | 'addCommandMarker';
-  currentMousePosition: Point | null; // x, y in meters
+  canvasMousePosition: Point | null; // x, y in meters - RENAMED from currentMousePosition
   selectedZoneId: string | null; // For highlighting selected zone
   selectedCommandMarkerId: string | null; // For highlighting selected command marker
 }
@@ -67,7 +67,7 @@ export const drawCanvasContent = ({
   eventZones,
   commandMarkers,
   editorMode,
-  currentMousePosition,
+  canvasMousePosition, // RENAMED from currentMousePosition
   selectedZoneId,
   selectedCommandMarkerId,
 }: DrawCanvasArgs) => {
@@ -438,11 +438,11 @@ export const drawCanvasContent = ({
   }
 
   // Draw visual cues for editor modes
-  if (currentMousePosition) {
+  if (canvasMousePosition) { // RENAMED from currentMousePosition
     if (editorMode === 'addEventZoneCenter') {
       const radiusInPixels = metersToPixels(config.waypoint.defaultRadius); // Using waypoint defaultRadius as a proxy for event zone default, adjust if specific config exists
-      const zoneX = metersToPixels(currentMousePosition.x);
-      const zoneY = metersToPixels(currentMousePosition.y);
+      const zoneX = metersToPixels(canvasMousePosition.x); // RENAMED
+      const zoneY = metersToPixels(canvasMousePosition.y); // RENAMED
       
       ctx.save();
       ctx.strokeStyle = 'rgba(255, 165, 0, 0.5)'; // Semi-transparent orange
@@ -462,7 +462,7 @@ export const drawCanvasContent = ({
 
       // Find closest point on path to mouse (in meters)
       for (const p of optimizedPath) {
-        const distSq = (p.x - currentMousePosition.x) ** 2 + (p.y - currentMousePosition.y) ** 2;
+        const distSq = (p.x - canvasMousePosition.x) ** 2 + (p.y - canvasMousePosition.y) ** 2; // RENAMED
         if (distSq < minDistanceSq) {
           minDistanceSq = distSq;
           closestPathPoint = p;

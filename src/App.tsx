@@ -251,7 +251,7 @@ const HolonomicPathOptimizer = () => {
     setResizingZoneId, // Pass setResizingZoneId
     updateEventZoneRadius, // Pass update function for radius
     commandMarkers, // Pass commandMarkers for hit testing
-    optimizedPath, // Pass optimizedPath for snapping
+    // optimizedPath, // Pass optimizedPath for snapping - REMOVED DUPLICATE, first one is kept
     selectedCommandMarkerId,
     setSelectedCommandMarkerId,
     draggingCommandMarkerId,

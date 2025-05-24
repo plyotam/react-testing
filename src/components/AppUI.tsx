@@ -86,6 +86,12 @@ export interface AppUIProps {
   clearPendingEventZoneCreation: () => void;
   pendingCommandMarkerCreation: { s: number, time: number, x: number, y: number } | null;
   clearPendingCommandMarkerCreation: () => void;
+
+  // Props for selection state from App.tsx
+  selectedZoneId: string | null;
+  setSelectedZoneId: React.Dispatch<React.SetStateAction<string | null>>;
+  selectedCommandMarkerId: string | null;
+  setSelectedCommandMarkerId: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 const AppUI: React.FC<AppUIProps> = (props) => {
@@ -105,7 +111,9 @@ const AppUI: React.FC<AppUIProps> = (props) => {
     eventZones, setEventZones,
     onAddEventZone, onUpdateEventZone, onDeleteEventZone,
     pendingEventZoneCreation, clearPendingEventZoneCreation,
-    pendingCommandMarkerCreation, clearPendingCommandMarkerCreation
+    pendingCommandMarkerCreation, clearPendingCommandMarkerCreation,
+    selectedZoneId, setSelectedZoneId, // Destructure new props
+    selectedCommandMarkerId, setSelectedCommandMarkerId // Destructure new props
   } = props;
 
   // Effect to update canvas cursor based on editor mode
@@ -482,6 +490,8 @@ const AppUI: React.FC<AppUIProps> = (props) => {
               onDeleteCommandMarker={onDeleteCommandMarker}
               pendingCommandMarkerCreation={pendingCommandMarkerCreation}
               clearPendingCommandMarkerCreation={clearPendingCommandMarkerCreation}
+              selectedCommandMarkerId={selectedCommandMarkerId} // Pass prop
+              setSelectedCommandMarkerId={setSelectedCommandMarkerId} // Pass prop
             />
           </div>
 
@@ -494,6 +504,8 @@ const AppUI: React.FC<AppUIProps> = (props) => {
               onDeleteEventZone={onDeleteEventZone}
               pendingEventZoneCreation={pendingEventZoneCreation}
               clearPendingEventZoneCreation={clearPendingEventZoneCreation}
+              selectedZoneId={selectedZoneId} // Pass prop
+              setSelectedZoneId={setSelectedZoneId} // Pass prop
             />
           </div>
         </div>

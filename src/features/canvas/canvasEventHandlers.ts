@@ -1,5 +1,5 @@
 import React from 'react';
-import { Waypoint, Point, OptimizedPathPoint } from '../../types';
+import { Waypoint, Point, OptimizedPathPoint, EventZone, CommandMarker } from '../../types';
 import { Config } from '../../config/appConfig';
 
 export interface CanvasEventHandlersArgs {
@@ -294,12 +294,15 @@ export const createCanvasEventHandlers = (args: CanvasEventHandlersArgs) => {
     } else if (mouseDownPosition && editorMode === 'waypoints') { 
       // This part is for creating waypoints on click if not dragging anything.
       // Ensure no command marker or zone was just selected for waypoint creation
-      if (selectedCommandMarkerId || selectedZoneId) return; 
-      const rect = canvas.getBoundingClientRect();
+      if (selectedCommandMarkerId || selectedZoneId) {
+        setMouseDownPosition(null); // Clear mouse down position as we are returning early
+        return;
+      }
+      const rect = canvas.getBoundingClientRect(); // Declare rect once
       // The current logic might need adjustment if a zone was just clicked (selected) without dragging.
       // For now, selectedZoneId might be set, but draggingZoneId is null here if not dragged.
       // This part seems okay, as it checks distDragged. A simple click on a zone (handled by mouseDown) would not trigger this.
-      const rect = canvas.getBoundingClientRect();
+      // const rect = canvas.getBoundingClientRect(); // REMOVED second declaration
       const upPixelX = e.clientX - rect.left;
       const upPixelY = e.clientY - rect.top;
       
