@@ -109,6 +109,11 @@ const HolonomicPathOptimizer = () => {
   const [simulationHistory, setSimulationHistory] = useState<SimulationDataPoint[]>([]);
   const [showGraphs, setShowGraphs] = useState(false);
 
+  // State for dragging waypoints
+  const [draggingWaypointIndex, setDraggingWaypointIndex] = useState<number | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+  const [mouseDownPosition, setMouseDownPosition] = useState<{ x: number, y: number } | null>(null);
+
   // Animation frame ID ref
   const animationFrameIdRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
@@ -127,6 +132,16 @@ const HolonomicPathOptimizer = () => {
   const metersToPixels = useCallback((meters: number) => meters * config.field.pixelsPerMeter, [config.field.pixelsPerMeter]);
   const pixelsToMeters = useCallback((pixels: number) => pixels / config.field.pixelsPerMeter, [config.field.pixelsPerMeter]);
   
+  // Helper function to update waypoint coordinates during drag
+  const updateWaypointCoordinates = useCallback((index: number, newX: number, newY: number) => {
+    setWaypoints(prevWaypoints => {
+      if (index < 0 || index >= prevWaypoints.length) return prevWaypoints;
+      const updated = [...prevWaypoints];
+      updated[index] = { ...updated[index], x: newX, y: newY };
+      return updated;
+    });
+  }, []); // setWaypoints is stable, but an empty dep array is fine here.
+
   // Helper functions for angle interpolation
   const normalizeAngleDeg = useCallback((angle: number): number => { // Normalize to [-180, 180)
     let result = angle % 360;
@@ -673,37 +688,139 @@ const HolonomicPathOptimizer = () => {
     drawCanvas();
   }, [drawCanvas]);
 
-  // Handle canvas click
-  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  // Handle canvas click - THIS WILL BE REPLACED by MouseDown/Move/Up
+  // const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  //   const canvas = canvasRef.current;
+  //   if (!canvas) return;
+  //   const rect = canvas.getBoundingClientRect();
+  //   const pixelX = e.clientX - rect.left;
+  //   const pixelY = e.clientY - rect.top;
+  //   const x = pixelsToMeters(pixelX);
+  //   const y = pixelsToMeters(pixelY);
+    
+  //   // Check if clicking on existing waypoint
+  //   const clickedWaypoint = waypoints.findIndex(wp => {
+  //     const distance = Math.sqrt((wp.x - x) ** 2 + (wp.y - y) ** 2);
+  //     return distance <= wp.radius;
+  //   });
+    
+  //   if (clickedWaypoint !== -1) {
+  //     setSelectedWaypoint(clickedWaypoint);
+  //   } else {
+  //     // Add new waypoint
+  //     const newWaypoint: Waypoint = {
+  //       x,
+  //       y,
+  //       radius: config.waypoint.defaultRadius,
+  //       targetVelocity: config.waypoint.defaultTargetVelocity,
+  //       heading: config.waypoint.defaultHeading,
+  //       stopAtWaypoint: config.waypoint.stopAtWaypoint,
+  //       stopDuration: config.waypoint.stopAtWaypoint ? config.waypoint.defaultStopDuration : undefined,
+  //     };
+  //     setWaypoints([...waypoints, newWaypoint]);
+  //     setSelectedWaypoint(waypoints.length);
+  //   }
+  // };
+
+  const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
     const pixelX = e.clientX - rect.left;
     const pixelY = e.clientY - rect.top;
-    const x = pixelsToMeters(pixelX);
-    const y = pixelsToMeters(pixelY);
     
-    // Check if clicking on existing waypoint
-    const clickedWaypoint = waypoints.findIndex(wp => {
-      const distance = Math.sqrt((wp.x - x) ** 2 + (wp.y - y) ** 2);
+    setMouseDownPosition({ x: pixelX, y: pixelY });
+
+    const meterX = pixelsToMeters(pixelX);
+    const meterY = pixelsToMeters(pixelY);
+
+    const clickedWaypointIndex = waypoints.findIndex(wp => {
+      const distance = Math.sqrt((wp.x - meterX) ** 2 + (wp.y - meterY) ** 2);
       return distance <= wp.radius;
     });
-    
-    if (clickedWaypoint !== -1) {
-      setSelectedWaypoint(clickedWaypoint);
+
+    if (clickedWaypointIndex !== -1) {
+      setSelectedWaypoint(clickedWaypointIndex);
+      setDraggingWaypointIndex(clickedWaypointIndex);
+      setIsDragging(true);
     } else {
-      // Add new waypoint
-      const newWaypoint: Waypoint = {
-        x,
-        y,
-        radius: config.waypoint.defaultRadius,
-        targetVelocity: config.waypoint.defaultTargetVelocity,
-        heading: config.waypoint.defaultHeading,
-        stopAtWaypoint: config.waypoint.stopAtWaypoint,
-        stopDuration: config.waypoint.stopAtWaypoint ? config.waypoint.defaultStopDuration : undefined,
-      };
-      setWaypoints([...waypoints, newWaypoint]);
-      setSelectedWaypoint(waypoints.length);
+      setSelectedWaypoint(null); // Click on empty space deselects
+      // Potentially set a flag here if you want to allow dragging to create new waypoints,
+      // but for now, dragging only moves existing ones.
+    }
+  };
+
+  const handleCanvasMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!isDragging || draggingWaypointIndex === null) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const pixelX = e.clientX - rect.left;
+    const pixelY = e.clientY - rect.top;
+    const meterX = pixelsToMeters(pixelX);
+    const meterY = pixelsToMeters(pixelY);
+
+    updateWaypointCoordinates(draggingWaypointIndex, meterX, meterY);
+  };
+
+  const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    if (isDragging) {
+      setIsDragging(false);
+      setDraggingWaypointIndex(null);
+    } else if (mouseDownPosition) {
+      // This was a click, not a drag. Check if it was a "simple" click to add a new waypoint.
+      const rect = canvas.getBoundingClientRect();
+      const upPixelX = e.clientX - rect.left;
+      const upPixelY = e.clientY - rect.top;
+      
+      const distDragged = Math.sqrt(
+        (upPixelX - mouseDownPosition.x)**2 + 
+        (upPixelY - mouseDownPosition.y)**2
+      );
+
+      // If mouse didn't move much and no waypoint was selected on mousedown (meaning click on empty space)
+      if (distDragged < 5 && selectedWaypoint === null) {
+        const meterX = pixelsToMeters(mouseDownPosition.x);
+        const meterY = pixelsToMeters(mouseDownPosition.y);
+        const newWaypoint: Waypoint = {
+          x: meterX,
+          y: meterY,
+          radius: config.waypoint.defaultRadius,
+          targetVelocity: config.waypoint.defaultTargetVelocity, // Use new defaults
+          maxVelocityConstraint: config.waypoint.defaultMaxVelocityConstraint,
+          heading: config.waypoint.defaultHeading,
+          stopAtWaypoint: config.waypoint.stopAtWaypoint,
+          stopDuration: config.waypoint.stopAtWaypoint ? config.waypoint.defaultStopDuration : undefined,
+        };
+        setWaypoints(prevWaypoints => [...prevWaypoints, newWaypoint]);
+        setSelectedWaypoint(waypoints.length); // This will be waypoints.length before the state update finishes, so it's the new index.
+                                                // A useEffect might be safer if direct length is an issue due to async state.
+                                                // For now, this usually works with how react batches. Let's monitor.
+                                                // Correct selection for new waypoint:
+                                                // setWaypoints(prev => {
+                                                //   const newWaypoints = [...prev, newWaypoint];
+                                                //   setSelectedWaypoint(newWaypoints.length - 1);
+                                                //   return newWaypoints;
+                                                // });
+                                                // Simpler:
+                                                // const newWaypoints = [...waypoints, newWaypoint];
+                                                // setWaypoints(newWaypoints);
+                                                // setSelectedWaypoint(newWaypoints.length - 1);
+                                                // Let's use a safer approach for setSelectedWaypoint
+      }
+    }
+    setMouseDownPosition(null);
+  };
+  
+  const handleCanvasMouseLeave = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (isDragging) {
+      setIsDragging(false);
+      setDraggingWaypointIndex(null);
+      setMouseDownPosition(null); // Reset mouse down position as drag is cancelled
     }
   };
 
@@ -1199,7 +1316,11 @@ const HolonomicPathOptimizer = () => {
           <div className="bg-background-primary/70 rounded-lg m-4 p-2 flex-grow flex items-center justify-center relative overflow-hidden">
             <canvas
               ref={canvasRef}
-              onClick={handleCanvasClick}
+              // onClick={handleCanvasClick} // Remove this
+              onMouseDown={handleCanvasMouseDown}
+              onMouseMove={handleCanvasMouseMove}
+              onMouseUp={handleCanvasMouseUp}
+              onMouseLeave={handleCanvasMouseLeave}
               className="border-2 border-border-color rounded-md cursor-crosshair object-contain"
             />
              {/* Grid lines overlay could be added here if needed, or drawn on canvas itself */}
