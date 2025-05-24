@@ -3,107 +3,26 @@ import { Download, Upload, Settings, Play, RotateCcw, Trash2, Image, Zap, Target
 import { CubicSpline } from './utils/CubicSpline';
 import { QuinticSpline } from './utils/QuinticSpline';
 import ConfigInput from './components/ConfigInput';
-import { Waypoint } from './types/Waypoint';
 import SimulationGraphs from './components/SimulationGraphs';
 import WaypointEditorPopup from './components/WaypointEditorPopup'; // Import the new component
 import FloatingGraphPopup from './components/FloatingGraphPopup'; // Import the new graph popup
-
-interface SimulationDataPoint {
-  time: number;
-  x: number;
-  y: number;
-  velocity: number;
-  acceleration: number;
-  heading: number;
-}
-
-interface Point {
-  x: number;
-  y: number;
-}
-
-interface ExclusionZone {
-  id: string;
-  corners: [Point, Point, Point, Point];
-  userInputPoints: [Point, Point, Point];
-}
+import { defaultConfig } from './config/appConfig'; // Import defaultConfig
+import { SimulationDataPoint, Point, Waypoint, RobotState, OptimizedPathPoint } from './types'; // Import interfaces including Waypoint and RobotState
+import { normalizeAngleDeg, interpolateAngleDeg, addDataPointToHistory } from './utils/helpers'; // Import utility functions
+import { generateOptimalPath as generateOptimalPathUtil } from './features/pathfinding/generateOptimalPath'; // Import the utility
+import { drawCanvasContent } from './features/canvas/drawCanvas'; // Import the new drawing function
 
 const HolonomicPathOptimizer = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
   
-  const defaultConfig = {
-    field: {
-      width: 16.54, // meters (FRC field)
-      height: 8.02, // meters
-      pixelsPerMeter: 50,
-      backgroundColor: '#514b42',
-      backgroundImage: null as string | null, // Allow string for data URL
-      showGrid: true,
-      gridSpacing: 1 // meters
-    },
-    robot: {
-      radius: 0.4, // meters
-      mass: 60, // kg
-      maxVelocity: 4.0, // m/s
-      maxAcceleration: 3.0, // m/s²
-      maxAngularVelocity: 360, // deg/s
-      maxAngularAcceleration: 720, // deg/s²
-      color: '#3b82f6',
-      orientationLength: 0.6 // meters
-    },
-    waypoint: {
-      defaultRadius: 0.3, // meters
-      defaultTargetVelocity: 1.5, // m/s
-      defaultMaxVelocityConstraint: 2.0, // m/s
-      minRadius: 0.1,
-      maxRadius: 2.0,
-      defaultHeading: 0, // degrees
-      stopAtWaypoint: false,
-      defaultStopDuration: 1.0, // seconds, NEW default for per-waypoint stop, if stopAtWaypoint is true
-    },
-    path: {
-      splineType: 'cubic', // 'cubic', 'quintic'
-      lookaheadDistance: 0.5, // meters
-      pathResolution: 0.05, // meters between path points
-      optimizationIterations: 100,
-      velocityOptimization: true,
-      curvatureLimit: 2.0, // 1/meters
-      color: '#ef4444',
-      width: 3,
-      waypointColor: '#10b981',
-      waypointBorderColor: '#065f46',
-      selectedColor: '#f59e0b',
-      velocityVisualization: true,
-      accentPrimary: '#3498db', // Default accent color (blue)
-      textPrimary: '#ecf0f1'    // Default text color (light gray/white)
-    },
-    physics: {
-      frictionCoefficient: 0.8,
-      wheelbase: 0.6, // meters (for visualization)
-      trackWidth: 0.5, // meters
-      momentOfInertia: 5.0 // kg⋅m²
-    }
-  };
-
   const [config, setConfig] = useState(defaultConfig);
   const [waypoints, setWaypoints] = useState<Waypoint[]>([]);
   const [selectedWaypoint, setSelectedWaypoint] = useState<number | null>(null);
-  const [optimizedPath, setOptimizedPath] = useState<{
-    x: number;
-    y: number;
-    s: number;
-    velocity: number;
-    acceleration: number;
-    curvature: number;
-    heading: number;
-    time: number;
-  }[]>([]);
+  const [optimizedPath, setOptimizedPath] = useState<OptimizedPathPoint[]>([]);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [robotState, setRobotState] = useState<{ 
-    x: number; y: number; rotation: number; velocity: number; angularVelocity: number 
-  }>({ 
+  const [robotState, setRobotState] = useState<RobotState>({ 
     x: 1, y: 1, rotation: 0, velocity: 0, angularVelocity: 0 
   });
   const [showConfig, setShowConfig] = useState(false);
@@ -186,368 +105,12 @@ const HolonomicPathOptimizer = () => {
     });
   }, []);
 
-  const normalizeAngleDeg = useCallback((angle: number): number => { // Normalize to [-180, 180)
-    let result = angle % 360;
-    if (result <= -180) result += 360;
-    if (result > 180) result -= 360; 
-    result = (angle % 360 + 540) % 360 - 180;
-    if (result === -180 && angle > 0) return 180; 
-    return result;
-  }, []);
-
-  const interpolateAngleDeg = useCallback((startAngle: number, endAngle: number, t: number): number => {
-      const sa = normalizeAngleDeg(startAngle);
-      const ea = normalizeAngleDeg(endAngle);
-      let diff = ea - sa;
-
-      if (diff > 180) {
-          diff -= 360;
-      } else if (diff < -180) {
-          diff += 360;
-      }
-      return sa + diff * t; 
-  }, [normalizeAngleDeg]);
-
-  const addDataPointToHistory = useCallback((history: SimulationDataPoint[], newDataPoint: SimulationDataPoint): SimulationDataPoint[] => {
-    if (history.length === 0 || history[history.length - 1].time < newDataPoint.time) {
-      return [...history, newDataPoint];
-    } else if (history[history.length - 1].time === newDataPoint.time) {
-      // Optional: Update the last point if time is the same, or just keep the old one
-      // For simplicity, we'll keep the old one if time hasn't advanced.
-      // If updates are needed: return [...history.slice(0, -1), newDataPoint];
-      return history; 
-    }
-    return history; // Should not be reached if time is decreasing, but as a fallback
-  }, []);
-
-  const generateOptimalPath = useCallback((waypoints: Waypoint[]) => {
-    const hardWaypoints = waypoints.filter(wp => !wp.isGuidePoint);
-    const guideWaypoints = waypoints.filter(wp => wp.isGuidePoint);
-
-    if (hardWaypoints.length < 2) {
-      setOptimizedPath([]);
-      setOptimizationMetrics(null);
-      if (waypoints.length > 0 && hardWaypoints.length < waypoints.length) { // Some points exist, but all are guides or only one hard
-        showMessage('info', 'Path requires at least two non-guide waypoints. Current guides will not form a path.');
-      } else if (waypoints.length > 0) { // Some points exist, but less than 2 are hard
-        // showMessage('info', 'Path requires at least two waypoints to form a path.'); // Generic message if no guides involved
-      }
-      return [];
-    }
-    
-    // --- A* Integration: Grid Setup ---
-    // Removed A* grid setup and exclusion zone processing.
-    // Path points will be directly from hardWaypoints for now.
-
-    let pathPointsForSpline: Point[] = hardWaypoints.map(wp => ({ x: wp.x, y: wp.y }));
-    console.log('[Debug] Initial pathPointsForSpline (from hardWaypoints):', JSON.parse(JSON.stringify(pathPointsForSpline)));
-
-    // --- Guide Waypoint Path Pulling Logic ---
-    if (guideWaypoints.length > 0 && pathPointsForSpline.length >= 2) {
-      const attractedPathPoints: Point[] = [pathPointsForSpline[0]]; // Start with the first hard point
-
-      for (let i = 0; i < pathPointsForSpline.length - 1; i++) {
-        const p1 = pathPointsForSpline[i];
-        const p2 = pathPointsForSpline[i+1];
-        
-        // Add p1 (which is already in attractedPathPoints or is the start of current segment)
-        // Then, find guide waypoints that might influence this segment
-        const segmentMidPoint = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
-        const segmentLength = Math.sqrt((p2.x - p1.x)**2 + (p2.y - p1.y)**2);
-
-        const influentialGuides = guideWaypoints.map(gw => {
-          // Distance from guide waypoint to segment midpoint (approximate check)
-          const distToMid = Math.sqrt((gw.x - segmentMidPoint.x)**2 + (gw.y - segmentMidPoint.y)**2);
-          // Project guide waypoint onto the line defined by p1 and p2
-          const l2 = (p2.x - p1.x)**2 + (p2.y - p1.y)**2;
-          if (l2 === 0) return { gw, distSq: Infinity, t: 0, closestPointOnSegment: {...p1} }; // p1 and p2 are the same
-          let t = ((gw.x - p1.x) * (p2.x - p1.x) + (gw.y - p1.y) * (p2.y - p1.y)) / l2;
-          t = Math.max(0, Math.min(1, t)); // Clamp t to be on the segment
-          const closestPointOnSegment = {
-            x: p1.x + t * (p2.x - p1.x),
-            y: p1.y + t * (p2.y - p1.y),
-          };
-          const distSq = (gw.x - closestPointOnSegment.x)**2 + (gw.y - closestPointOnSegment.y)**2;
-          return { gw, distSq, t, closestPointOnSegment };
-        })
-        // Consider guides whose projection is on this segment or reasonably close
-        // And sort them by their projection point's parameter 't' along the segment
-        .filter(item => item.distSq < ( (segmentLength/2 + item.gw.radius) * (segmentLength/2 + item.gw.radius) * 2) ) // Heuristic filter
-        .sort((a,b) => a.t - b.t);
-
-        for (const { gw, closestPointOnSegment } of influentialGuides) {
-          const influence = gw.guideInfluence ?? 0.5; // Default influence if undefined
-          const attractedPoint = {
-            x: closestPointOnSegment.x + (gw.x - closestPointOnSegment.x) * influence,
-            y: closestPointOnSegment.y + (gw.y - closestPointOnSegment.y) * influence,
-          };
-          attractedPathPoints.push(attractedPoint);
-        }
-        attractedPathPoints.push(p2); // Add the end of the hard segment
-      }
-      
-      // Filter out consecutive duplicate points that might have been added
-      pathPointsForSpline = attractedPathPoints.filter((point, index, self) => 
-        index === 0 || !(point.x === self[index-1].x && point.y === self[index-1].y)
-      );
-      console.log('[Debug] pathPointsForSpline after guide influence:', JSON.parse(JSON.stringify(pathPointsForSpline)));
-    }
-    // --- End Guide Waypoint Logic ---
-
-    if (pathPointsForSpline.length < 2) {
-      setOptimizationMetrics(null);
-      setOptimizedPath([]);
-      showMessage('error', 'Not enough points for spline path after guide influence. Try different waypoints or guides.');
-      return [];
-    }
-
-    const path: {
-      x: number;
-      y: number;
-      s: number;
-      velocity: number;
-      acceleration: number;
-      curvature: number;
-      heading: number;
-      time: number;
-    }[] = [];
-    const metrics = {
-      totalDistance: 0,
-      totalTime: 0,
-      maxCurvature: 0,
-      maxAcceleration: 0,
-      energyConsumption: 0
-    };
-    
-    const s_coords = [0];
-    for (let i = 1; i < pathPointsForSpline.length; i++) {
-      const dx = pathPointsForSpline[i].x - pathPointsForSpline[i-1].x;
-      const dy = pathPointsForSpline[i].y - pathPointsForSpline[i-1].y;
-      s_coords.push(s_coords[s_coords.length - 1] + Math.sqrt(dx*dx + dy*dy));
-    }
-    
-    let xSpline, ySpline;
-    const splineXCoords = pathPointsForSpline.map(p => p.x);
-    const splineYCoords = pathPointsForSpline.map(p => p.y);
-
-    if (s_coords.length < 2 || splineXCoords.length < 2 || splineYCoords.length < 2) {
-        console.error("[Spline Error] Not enough points for spline creation from A* path.", s_coords, splineXCoords, splineYCoords);
-        setOptimizationMetrics(null);
-        setOptimizedPath([]);
-        showMessage('error', 'Spline creation failed due to insufficient points from A*.');
-        return [];
-    }
-
-    if (config.path.splineType === 'quintic') {
-      xSpline = new QuinticSpline(s_coords, splineXCoords);
-      ySpline = new QuinticSpline(s_coords, splineYCoords);
-    } else {
-      xSpline = new CubicSpline(s_coords, splineXCoords);
-      ySpline = new CubicSpline(s_coords, splineYCoords);
-    }
-    
-    const totalDistance = s_coords.length > 1 ? s_coords[s_coords.length - 1] : 0;
-    metrics.totalDistance = totalDistance;
-    
-    const pathResolution = config.path.pathResolution;
-    const numPoints = totalDistance > 0 ? Math.ceil(totalDistance / pathResolution) : 0;
-    let accumulatedTime = 0;
-
-    if (numPoints >= 0 && pathPointsForSpline.length > 0) {
-      const s0 = 0;
-      const x0 = xSpline.interpolate(s0);
-      const y0 = ySpline.interpolate(s0);
-      const dx_ds0 = xSpline.derivative(s0);
-      const dy_ds0 = ySpline.derivative(s0);
-      const d2x_ds2_0 = xSpline.secondDerivative(s0);
-      const d2y_ds2_0 = ySpline.secondDerivative(s0);
-      const cNum0 = dx_ds0 * d2y_ds2_0 - dy_ds0 * d2x_ds2_0;
-      const cDen0 = Math.pow(dx_ds0**2 + dy_ds0**2, 1.5);
-      const curvature0 = cDen0 < 1e-6 ? 0 : Math.abs(cNum0) / cDen0;
-      const heading0 = Math.atan2(dy_ds0, dx_ds0) * 180 / Math.PI;
-
-      let v0 = config.robot.maxVelocity;
-      if (curvature0 > 0.001) {
-        v0 = Math.min(v0, Math.sqrt(config.robot.maxAcceleration / curvature0));
-      }
-
-      // Velocity constraints for the first point are based on the first HARD waypoint
-      if (hardWaypoints.length > 0) {
-        const firstHardWaypoint = hardWaypoints[0];
-        const distToFirstHardWp = Math.sqrt((x0 - firstHardWaypoint.x)**2 + (y0 - firstHardWaypoint.y)**2);
-
-        if (distToFirstHardWp < firstHardWaypoint.radius) {
-          if (firstHardWaypoint.stopAtWaypoint) {
-            const criticalStopDist = config.path.pathResolution * 2.0;
-            if (distToFirstHardWp < criticalStopDist) {
-              v0 = 0.0;
-            } else {
-              const distTarget = Math.max(0, distToFirstHardWp - 0.01);
-              const decelToStopV = Math.sqrt(2 * config.robot.maxAcceleration * distTarget);
-              v0 = Math.min(v0, decelToStopV);
-            }
-          } else {
-            let wpMax = v0;
-            if (firstHardWaypoint.maxVelocityConstraint !== undefined) {
-              wpMax = Math.min(wpMax, firstHardWaypoint.maxVelocityConstraint);
-            }
-            if (firstHardWaypoint.targetVelocity !== undefined) {
-              v0 = Math.min(wpMax, firstHardWaypoint.targetVelocity);
-            } else {
-              v0 = wpMax;
-            }
-          }
-        }
-      }
-      v0 = Math.max(0, v0); 
-      path.push({ x: x0, y: y0, s: s0, velocity: v0, acceleration: 0, curvature: curvature0, heading: heading0, time: 0 });
-      metrics.maxCurvature = Math.max(metrics.maxCurvature, curvature0);
-    }
-
-    for (let i = 1; i <= numPoints; i++) {
-      const s = (i / numPoints) * totalDistance;
-      const x = xSpline.interpolate(s);
-      const y = ySpline.interpolate(s);
-      const dx_ds = xSpline.derivative(s);
-      const dy_ds = ySpline.derivative(s);
-      const d2x_ds2 = xSpline.secondDerivative(s);
-      const d2y_ds2 = ySpline.secondDerivative(s);
-      const curvatureNumerator = dx_ds * d2y_ds2 - dy_ds * d2x_ds2;
-      const curvatureDenominator = Math.pow(dx_ds * dx_ds + dy_ds * dy_ds, 1.5);
-      const curvature = curvatureDenominator < 1e-6 ? 0 : Math.abs(curvatureNumerator) / curvatureDenominator;
-      metrics.maxCurvature = Math.max(metrics.maxCurvature, curvature);
-      const heading = Math.atan2(dy_ds, dx_ds) * 180 / Math.PI;
-
-      let nearestHardWaypointIndex = -1;
-      let minDistToHardWaypoint = Infinity;
-      for (let j = 0; j < hardWaypoints.length; j++) {
-        const distSq = (x - hardWaypoints[j].x)**2 + (y - hardWaypoints[j].y)**2;
-        if (distSq < minDistToHardWaypoint) { // Compare squared distances
-          minDistToHardWaypoint = distSq;
-          nearestHardWaypointIndex = j;
-        }
-      }
-      minDistToHardWaypoint = Math.sqrt(minDistToHardWaypoint); // Take sqrt once after loop
-      const nearestHardWaypoint = nearestHardWaypointIndex !== -1 ? hardWaypoints[nearestHardWaypointIndex] : null;
-
-      let v_achieved;
-      let currentAcceleration;
-      let segmentTime;
-      const prevPoint = path[path.length - 1];
-      const v_prev = prevPoint.velocity;
-      const segmentDx = x - prevPoint.x;
-      const segmentDy = y - prevPoint.y;
-      const d_s = Math.sqrt(segmentDx**2 + segmentDy**2);
-
-      let isCurrentPointNearHardStop = false;
-      if (nearestHardWaypoint) {
-        const simNearDist = nearestHardWaypoint.radius * 0.70;
-        const pathGenStopDist = config.path.pathResolution * 2.0;
-        const effectiveStopDist = Math.min(simNearDist, pathGenStopDist);
-        isCurrentPointNearHardStop = nearestHardWaypoint.stopAtWaypoint && minDistToHardWaypoint < effectiveStopDist;
-      }
-
-      if (isCurrentPointNearHardStop) {
-        v_achieved = 0.0;
-        if (d_s < 1e-6) { 
-            currentAcceleration = 0;
-            segmentTime = 0.001; 
-        } else {
-            currentAcceleration = (v_achieved**2 - v_prev**2) / (2 * d_s);
-        }
-      } else {
-        let targetVelocityForKinematics = config.robot.maxVelocity;
-        if (curvature > 0.001) {
-          targetVelocityForKinematics = Math.min(targetVelocityForKinematics, Math.sqrt(config.robot.maxAcceleration / curvature));
-        }
-
-        if (nearestHardWaypoint && nearestHardWaypoint.stopAtWaypoint) {
-          const requiredStoppingDistance = (v_prev > 0.1) ? (v_prev**2) / (2 * config.robot.maxAcceleration) : 0;
-          const adaptiveLookahead = Math.min(requiredStoppingDistance * 1.5, config.robot.maxVelocity * 1.0);
-          const stopInfluenceZone = Math.max(nearestHardWaypoint.radius, adaptiveLookahead);
-
-          if (minDistToHardWaypoint < stopInfluenceZone) {
-             let currentEffectiveStopDist = config.path.pathResolution * 2.0;
-             if (nearestHardWaypoint) { // Should always be true here
-                const simNearDist = nearestHardWaypoint.radius * 0.70;
-                currentEffectiveStopDist = Math.min(simNearDist, config.path.pathResolution * 2.0);
-             }
-            const distanceToHardStopEdge = Math.max(0, minDistToHardWaypoint - currentEffectiveStopDist);
-            const velocityToNaturallyStopAtHardStopEdge = Math.sqrt(2 * config.robot.maxAcceleration * distanceToHardStopEdge);
-            targetVelocityForKinematics = Math.min(targetVelocityForKinematics, velocityToNaturallyStopAtHardStopEdge);
-          }
-        } else if (nearestHardWaypoint) { // Non-stop hard waypoint
-          if (minDistToHardWaypoint < nearestHardWaypoint.radius) {
-            if (nearestHardWaypoint.maxVelocityConstraint !== undefined) {
-              targetVelocityForKinematics = Math.min(targetVelocityForKinematics, nearestHardWaypoint.maxVelocityConstraint);
-            }
-            if (nearestHardWaypoint.targetVelocity !== undefined) {
-              targetVelocityForKinematics = Math.min(targetVelocityForKinematics, nearestHardWaypoint.targetVelocity);
-            }
-          }
-        }
-        targetVelocityForKinematics = Math.max(0, targetVelocityForKinematics);
-
-        if (d_s < 1e-6) {
-          v_achieved = v_prev;
-          currentAcceleration = 0;
-        } else {
-          if (targetVelocityForKinematics >= v_prev) {
-            const v_if_full_accel = Math.sqrt(v_prev**2 + 2 * config.robot.maxAcceleration * d_s);
-            v_achieved = Math.min(targetVelocityForKinematics, v_if_full_accel);
-          } else {
-            const v_if_full_decel_sq = v_prev**2 - 2 * config.robot.maxAcceleration * d_s;
-            const v_if_full_decel = v_if_full_decel_sq > 0 ? Math.sqrt(v_if_full_decel_sq) : 0;
-            v_achieved = Math.max(targetVelocityForKinematics, v_if_full_decel);
-          }
-          currentAcceleration = (v_achieved**2 - v_prev**2) / (2*d_s);
-        }
-      }
-      
-      currentAcceleration = Math.max(-config.robot.maxAcceleration, Math.min(config.robot.maxAcceleration, currentAcceleration));
-      metrics.maxAcceleration = Math.max(metrics.maxAcceleration, Math.abs(currentAcceleration));
-
-      if (d_s < 1e-6) { 
-          segmentTime = 0.001;
-      } else if (Math.abs(currentAcceleration) > 1e-4) { 
-        segmentTime = (v_achieved - v_prev) / currentAcceleration;
-      } else if (Math.abs(v_achieved - v_prev) < 1e-4 && (v_achieved + v_prev > 1e-4)) { 
-         segmentTime = (2 * d_s) / (v_achieved + v_prev);
-      } else if (Math.abs(v_achieved) < 1e-3 && Math.abs(v_prev) < 1e-3) { 
-         segmentTime = 0.02;
-      } else { 
-        segmentTime = 0.02;
-      }
-      
-      if (segmentTime <= 1e-5 && d_s > 1e-6) { 
-          segmentTime = 1e-5; 
-          if (Math.abs(v_achieved - v_prev) > 1e-4) {
-            currentAcceleration = (v_achieved - v_prev) / segmentTime;
-            currentAcceleration = Math.max(-config.robot.maxAcceleration, Math.min(config.robot.maxAcceleration, currentAcceleration));
-          } else {
-            currentAcceleration = 0;
-          }
-      }
-      if (segmentTime < 0) segmentTime = Math.abs(segmentTime);
-
-      accumulatedTime += segmentTime;
-      const avgVelForEnergy = (v_achieved + v_prev) / 2;
-      const power = config.robot.mass * Math.abs(currentAcceleration) * Math.abs(avgVelForEnergy) + 
-                   0.5 * config.physics.frictionCoefficient * config.robot.mass * 9.81 * Math.abs(avgVelForEnergy);
-      if (segmentTime > 1e-5) metrics.energyConsumption += Math.abs(power) * segmentTime;
-
-      path.push({ x, y, s, velocity: v_achieved, acceleration: currentAcceleration, curvature, heading, time: accumulatedTime });
-    }
-    
-    metrics.totalTime = accumulatedTime;
-    setOptimizationMetrics(metrics);
-    return path;
-  }, [config, showMessage]); // Removed waypoints, as it's passed directly. generateOptimalPath itself is a dependency for the useEffect that calls it.
-
   useEffect(() => {
     if (waypoints.length >= 2) {
-      const newPath = generateOptimalPath(waypoints);
+      // Call the utility function, passing necessary state/callbacks
+      const { path: newPath, metrics: newMetrics } = generateOptimalPathUtil(waypoints, config, showMessage);
       setOptimizedPath(newPath);
+      setOptimizationMetrics(newMetrics); // Set metrics from the result
 
       // Calculate waypointSHeadings
       if (newPath.length > 0) {
@@ -579,7 +142,7 @@ const HolonomicPathOptimizer = () => {
       setOptimizationMetrics(null);
       setWaypointSHeadings([]); // Clear here too
     }
-  }, [waypoints, generateOptimalPath]); // generateOptimalPath depends on config
+  }, [waypoints, config, showMessage]); // Add config and showMessage to dependencies
 
   useEffect(() => {
     const defaultBgPath = 'fields/field25.png'; // Path relative to public folder
@@ -610,299 +173,50 @@ const HolonomicPathOptimizer = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // Run only once on mount
 
-  const drawCanvas = useCallback(() => {
+  useEffect(() => {
+    // New drawCanvas useEffect using the imported function
     const canvas = canvasRef.current;
     if (!canvas) return;
     
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
-    
+
+    // Ensure canvas dimensions are set based on config before drawing
+    // This was implicitly handled by the old drawCanvas, ensure it's explicit now
     const canvasWidth = metersToPixels(config.field.width);
     const canvasHeight = metersToPixels(config.field.height);
-    
-    // Set canvas size
-    canvas.width = canvasWidth;
-    canvas.height = canvasHeight;
-    
-    ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-    
-    // Draw background
-    ctx.fillStyle = config.field.backgroundColor;
-    ctx.fillRect(0, 0, canvasWidth, canvasHeight);
-    
-    // Draw background image if available
-    if (backgroundImage) {
-      ctx.drawImage(backgroundImage, 0, 0, canvasWidth, canvasHeight);
-    }
-    
-    // Draw grid
-    if (config.field.showGrid) {
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.2)';
-      ctx.lineWidth = 1;
-      
-      const gridSpacing = metersToPixels(config.field.gridSpacing);
-      for (let x = 0; x <= canvasWidth; x += gridSpacing) {
-        ctx.beginPath();
-        ctx.moveTo(x, 0);
-        ctx.lineTo(x, canvasHeight);
-        ctx.stroke();
-      }
-      
-      for (let y = 0; y <= canvasHeight; y += gridSpacing) {
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(canvasWidth, y);
-        ctx.stroke();
-      }
-    }
-    
-    // Draw optimized path with velocity visualization
-    if (optimizedPath.length > 1) {
-      for (let i = 0; i < optimizedPath.length - 1; i++) {
-        const current = optimizedPath[i];
-        const next = optimizedPath[i + 1];
-        
-        if (config.path.velocityVisualization) {
-          // Color based on velocity (red = slow, green = fast)
-          const velocityRatio = current.velocity / config.robot.maxVelocity;
-          const red = Math.floor(255 * (1 - velocityRatio));
-          const green = Math.floor(255 * velocityRatio);
-          ctx.strokeStyle = `rgb(${red}, ${green}, 0)`;
-        } else {
-          ctx.strokeStyle = config.path.color;
-        }
-        
-        ctx.lineWidth = config.path.width;
-        ctx.beginPath();
-        ctx.moveTo(metersToPixels(current.x), metersToPixels(current.y));
-        ctx.lineTo(metersToPixels(next.x), metersToPixels(next.y));
-        ctx.stroke();
-      }
-    }
-    
-    // Draw waypoints
-    waypoints.forEach((waypoint, index) => {
-      const isSelected = selectedWaypoint === index;
-      const pixelX = metersToPixels(waypoint.x);
-      const pixelY = metersToPixels(waypoint.y);
-      const pixelRadius = metersToPixels(waypoint.radius);
-      
-      // Draw radius circle
-      ctx.save(); // Save context state for potential dashed lines
-      if (waypoint.isGuidePoint) {
-        ctx.setLineDash([5, 5]); // Dashed line for guide points
-        ctx.strokeStyle = isSelected ? config.path.selectedColor : '#8888FF'; // Lighter blue for guide border
-        ctx.fillStyle = isSelected ? config.path.selectedColor + '15' : '#8888FF' + '15';
-      } else {
-        ctx.strokeStyle = isSelected ? config.path.selectedColor : config.path.waypointBorderColor;
-        ctx.fillStyle = isSelected ? config.path.selectedColor + '20' : config.path.waypointColor + '20';
-      }
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(pixelX, pixelY, pixelRadius, 0, 2 * Math.PI);
-      ctx.fill();
-      ctx.stroke();
-      ctx.restore(); // Restore to solid lines if changed
-      
-      // Draw waypoint center
-      if (waypoint.isGuidePoint) {
-        ctx.fillStyle = isSelected ? config.path.selectedColor : '#AAAAFF'; // Lighter blue center for guide
-      } else {
-        ctx.fillStyle = isSelected ? config.path.selectedColor : config.path.waypointColor;
-      }
-      ctx.beginPath();
-      ctx.arc(pixelX, pixelY, 8, 0, 2 * Math.PI);
-      ctx.fill();
-      
-      // Draw target heading if set
-      if (waypoint.heading !== undefined) {
-        const angle = waypoint.heading * Math.PI / 180;
-        const length = metersToPixels(0.8);
-        ctx.strokeStyle = isSelected ? config.path.selectedColor : config.path.waypointColor;
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(pixelX, pixelY);
-        ctx.lineTo(pixelX + Math.cos(angle) * length, pixelY + Math.sin(angle) * length);
-        ctx.stroke();
-        
-        // Arrow head
-        ctx.beginPath();
-        ctx.moveTo(pixelX + Math.cos(angle) * length, pixelY + Math.sin(angle) * length);
-        ctx.lineTo(pixelX + Math.cos(angle - 0.5) * (length - 12), pixelY + Math.sin(angle - 0.5) * (length - 12));
-        ctx.moveTo(pixelX + Math.cos(angle) * length, pixelY + Math.sin(angle) * length);
-        ctx.lineTo(pixelX + Math.cos(angle + 0.5) * (length - 12), pixelY + Math.sin(angle + 0.5) * (length - 12));
-        ctx.stroke();
-      }
-      
-      // Draw waypoint label with velocity/status
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 12px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.strokeStyle = '#000000';
-      ctx.lineWidth = 3;
-      ctx.strokeText(`${index + 1}`, pixelX, pixelY - pixelRadius - 15);
-      ctx.fillText(`${index + 1}`, pixelX, pixelY - pixelRadius - 15);
-      
-      ctx.font = '10px sans-serif';
-      let velocityStatusText = "Path Optimized";
-      if (waypoint.stopAtWaypoint) {
-        const duration = waypoint.stopDuration !== undefined ? waypoint.stopDuration : config.waypoint.defaultStopDuration;
-        velocityStatusText = `STOP (${duration.toFixed(1)}s)`;
-      } else if (waypoint.targetVelocity !== undefined) {
-        velocityStatusText = `T: ${waypoint.targetVelocity.toFixed(1)}m/s`;
-        if (waypoint.maxVelocityConstraint !== undefined) {
-          velocityStatusText += ` M: ${waypoint.maxVelocityConstraint.toFixed(1)}m/s`;
-        }
-      } else if (waypoint.maxVelocityConstraint !== undefined) {
-        velocityStatusText = `Max: ${waypoint.maxVelocityConstraint.toFixed(1)}m/s`;
-      }
-      // else it remains "Path Optimized" or could be an empty string if preferred
+    if (canvas.width !== canvasWidth) canvas.width = canvasWidth;
+    if (canvas.height !== canvasHeight) canvas.height = canvasHeight;
 
-      ctx.strokeText(velocityStatusText, pixelX, pixelY - pixelRadius - 5);
-      ctx.fillText(velocityStatusText, pixelX, pixelY - pixelRadius - 5);
+    drawCanvasContent({
+      canvas,
+      ctx,
+      config,
+      waypoints,
+      selectedWaypoint,
+      robotState,
+      optimizedPath,
+      backgroundImage,
+      metersToPixels,
+      isMeasuring,
+      measurePoints,
+      measuredDistance,
+      measurePreviewPoint,
     });
-    
-    // Draw robot
-    const robot = robotState;
-    const pixelX = metersToPixels(robot.x);
-    const pixelY = metersToPixels(robot.y);
-    const pixelRadius = metersToPixels(config.robot.radius);
-    
-    ctx.fillStyle = config.robot.color;
-    ctx.beginPath();
-    ctx.arc(pixelX, pixelY, pixelRadius, 0, 2 * Math.PI);
-    ctx.fill();
-    
-    // Draw robot orientation
-    const angle = robot.rotation * Math.PI / 180;
-    const orientationLength = metersToPixels(config.robot.orientationLength);
-    ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(pixelX, pixelY);
-    ctx.lineTo(pixelX + Math.cos(angle) * orientationLength, 
-               pixelY + Math.sin(angle) * orientationLength);
-    ctx.stroke();
-    
-    // Draw robot frame (wheelbase visualization)
-    ctx.save(); // Save current context state
-    ctx.translate(pixelX, pixelY); // Move to robot's center
-    ctx.rotate(angle); // Rotate by robot's angle
-
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
-    ctx.lineWidth = 2;
-    const wheelbasePixels = metersToPixels(config.physics.wheelbase);
-    const trackWidthPixels = metersToPixels(config.physics.trackWidth);
-    
-    ctx.beginPath();
-    // Draw rectangle centered at (0,0) in the new rotated context
-    ctx.rect(-wheelbasePixels / 2, -trackWidthPixels / 2, 
-             wheelbasePixels, trackWidthPixels);
-    ctx.stroke();
-    
-    ctx.restore(); // Restore context to pre-transformation state
-    
-    // Draw measuring tool elements if active
-    if (isMeasuring) {
-      // Theme-aligned colors (Orange/Grey)
-      const orangeAccent = config.path.selectedColor || '#f59e0b'; // Orange from theme (selectedColor)
-      const lightGreyText = config.path.textPrimary || '#ecf0f1';    // Light grey from theme (textPrimary)
-      // Dark semi-transparent grey for text background
-      const textBackgroundColor = 'rgba(75, 75, 75, 0.75)'; 
-
-      const pointRadius = 6;
-      const crosshairSize = 4;
-
-      measurePoints.forEach((point, index) => {
-        const pixelX = metersToPixels(point.x);
-        const pixelY = metersToPixels(point.y);
-        
-        // Draw measure point (outlined circle)
-        ctx.strokeStyle = orangeAccent;
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(pixelX, pixelY, pointRadius, 0, 2 * Math.PI);
-        ctx.stroke();
-        
-        // Crosshair
-        ctx.strokeStyle = lightGreyText; 
-        ctx.lineWidth = 1; 
-        ctx.beginPath();
-        ctx.moveTo(pixelX - crosshairSize, pixelY);
-        ctx.lineTo(pixelX + crosshairSize, pixelY);
-        ctx.moveTo(pixelX, pixelY - crosshairSize);
-        ctx.lineTo(pixelX, pixelY + crosshairSize);
-        ctx.stroke();
-        
-        // Draw point number
-        ctx.fillStyle = lightGreyText; 
-        ctx.font = 'bold 11px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        ctx.fillText(`${index + 1}`, pixelX, pixelY - pointRadius - 4);
-      });
-
-      const drawDistanceText = (text: string, midX: number, midY: number) => {
-        ctx.font = 'bold 13px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'bottom';
-        const textMetrics = ctx.measureText(text);
-        const textWidth = textMetrics.width;
-        const textHeight = 13; 
-        const padding = 5;
-
-        ctx.fillStyle = textBackgroundColor;
-        ctx.beginPath();
-        ctx.rect(midX - textWidth / 2 - padding, midY - textHeight - padding, textWidth + padding * 2, textHeight + padding * 2);
-        ctx.fill();
-
-        ctx.fillStyle = lightGreyText; 
-        ctx.fillText(text, midX, midY);
-      };
-
-      // Live preview drawing
-      if (measurePoints.length === 1 && measurePreviewPoint) {
-        const p1 = {x: metersToPixels(measurePoints[0].x), y: metersToPixels(measurePoints[0].y)};
-        const pPreview = {x: metersToPixels(measurePreviewPoint.x), y: metersToPixels(measurePreviewPoint.y)};
-        
-        ctx.strokeStyle = orangeAccent; // Use orangeAccent for line
-        ctx.lineWidth = 1.5; 
-        ctx.setLineDash([4, 4]); 
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(pPreview.x, pPreview.y);
-        ctx.stroke();
-        ctx.setLineDash([]); 
-
-        const midX = (p1.x + pPreview.x) / 2;
-        const midY = (p1.y + pPreview.y) / 2 - 10; 
-        const dx = measurePreviewPoint.x - measurePoints[0].x;
-        const dy = measurePreviewPoint.y - measurePoints[0].y;
-        const currentPreviewDistance = Math.sqrt(dx*dx + dy*dy);
-        drawDistanceText(`${currentPreviewDistance.toFixed(2)} m`, midX, midY);
-      } 
-      // Drawing for finalized measurement
-      else if (measurePoints.length === 2 && measuredDistance !== null) {
-        const p1 = {x: metersToPixels(measurePoints[0].x), y: metersToPixels(measurePoints[0].y)};
-        const p2 = {x: metersToPixels(measurePoints[1].x), y: metersToPixels(measurePoints[1].y)};
-
-        ctx.strokeStyle = orangeAccent; // Use orangeAccent for line
-        ctx.lineWidth = 2; 
-        ctx.beginPath();
-        ctx.moveTo(p1.x, p1.y);
-        ctx.lineTo(p2.x, p2.y);
-        ctx.stroke();
-
-        const midX = (p1.x + p2.x) / 2;
-        const midY = (p1.y + p2.y) / 2 - 10; 
-        drawDistanceText(`${measuredDistance.toFixed(2)} m`, midX, midY);
-      }
-    }
-  }, [config, waypoints, selectedWaypoint, robotState, optimizedPath, backgroundImage, metersToPixels, isMeasuring, measurePoints, measuredDistance, measurePreviewPoint]);
-
-  useEffect(() => {
-    drawCanvas();
-  }, [drawCanvas]);
+  }, [
+    config, 
+    waypoints, 
+    selectedWaypoint, 
+    robotState, 
+    optimizedPath, 
+    backgroundImage, 
+    metersToPixels, 
+    isMeasuring, 
+    measurePoints, 
+    measuredDistance, 
+    measurePreviewPoint,
+    canvasRef // Add canvasRef as dependency as it's used to get the canvas element
+  ]);
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -1175,10 +489,8 @@ const HolonomicPathOptimizer = () => {
         } else if (firstApplicableTarget) {
             initialRotation = firstApplicableTarget.heading;
         } else if (waypointSHeadings.length > 0) {
-            // If all targets are before path starts (edge case) or no targets after start, use last known target
             initialRotation = waypointSHeadings[waypointSHeadings.length - 1].heading;
         } else {
-            // No waypoint headings at all, default to 0 for holonomic robot
             initialRotation = 0; 
         }
     }
@@ -1190,9 +502,11 @@ const HolonomicPathOptimizer = () => {
         time: 0,
         x: firstPoint.x,
         y: firstPoint.y,
-        velocity: firstPoint.velocity, // Use velocity from path itself
-        acceleration: firstPoint.acceleration, // Use acceleration from path itself
+        s: firstPoint.s, 
+        velocity: firstPoint.velocity, 
+        acceleration: firstPoint.acceleration, 
         heading: initialRotation, 
+        curvature: firstPoint.curvature,
       };
       setSimulationHistory([initialDataPoint]);
       setRobotState({
@@ -1246,15 +560,17 @@ const HolonomicPathOptimizer = () => {
       let newPathIndex = optimizedPath.findIndex(p => p.time >= simulatedTimeRef.current);
 
       if (newPathIndex === -1 && optimizedPath.length > 0 && simulatedTimeRef.current > optimizedPath[optimizedPath.length - 1].time) {
-        newPathIndex = optimizedPath.length - 1; // Clamp to the last point
+        newPathIndex = optimizedPath.length - 1; 
         const lastPoint = optimizedPath[newPathIndex];
         const finalDataPoint: SimulationDataPoint = {
-          time: lastPoint.time, // Use actual last point time
+          time: lastPoint.time, 
           x: lastPoint.x,
           y: lastPoint.y,
-          velocity: 0, // Assume 0 velocity at the very end
-          acceleration: 0, // Assume 0 acceleration at the very end
-          heading: lastPoint.heading || robotState.rotation, // Use path heading or last robot rotation
+          s: lastPoint.s, 
+          velocity: 0, 
+          acceleration: 0, 
+          heading: lastPoint.heading || robotState.rotation, 
+          curvature: lastPoint.curvature !== undefined ? lastPoint.curvature : 0,
         };
         setSimulationHistory(prevHistory => addDataPointToHistory(prevHistory, finalDataPoint));
         setRobotState({
@@ -1315,9 +631,11 @@ const HolonomicPathOptimizer = () => {
         time: simulatedTimeRef.current,
         x: currentPathPoint.x,
         y: currentPathPoint.y,
+        s: currentPathPoint.s,
         velocity: currentPathPoint.velocity,
         acceleration: currentPathPoint.acceleration,
         heading: newRobotRotation,
+        curvature: currentPathPoint.curvature,
       };
       setSimulationHistory(prevHistory => addDataPointToHistory(prevHistory, liveDataPoint));
 
@@ -1360,9 +678,11 @@ const HolonomicPathOptimizer = () => {
           time: simulatedTimeRef.current,
           x: currentPathPoint.x,
           y: currentPathPoint.y,
+          s: currentPathPoint.s,
           velocity: 0,
           acceleration: 0, 
           heading: stopStateHeading,
+          curvature: currentPathPoint.curvature !== undefined ? currentPathPoint.curvature : 0,
         };
         setSimulationHistory(prevHistory => addDataPointToHistory(prevHistory, stopDataPoint));
         
