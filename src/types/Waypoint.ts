@@ -7,4 +7,6 @@ export interface Waypoint {
   heading?: number; // Optional heading in degrees
   stopAtWaypoint: boolean;
   stopDuration?: number; // Optional: duration in seconds to stop if stopAtWaypoint is true. Overrides global if set.
+  isGuidePoint?: boolean; // New: If true, this waypoint is a suggestion, not a strict requirement.
+  guideInfluence?: number; // New: How strongly a guide point pulls the path (e.g., 0 to 1).
 } 
