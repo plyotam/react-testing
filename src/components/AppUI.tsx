@@ -3,7 +3,7 @@ import {
   Download, Upload, Settings, Play, RotateCcw, Trash2, Image, Zap, Target, Square, BarChart2, GripVertical, Ruler, X,
   LayoutGrid, ToyBrick, GitFork // Added new icons
 } from 'lucide-react';
-import { Waypoint, SimulationDataPoint, OptimizedPathPoint, CommandMarker, EventZone } from '../types';
+import { Waypoint, SimulationDataPoint, OptimizedPathPoint, CommandMarker, EventZone, TriggeredEvent } from '../types';
 import { Config } from '../config/appConfig';
 import WaypointEditorPopup from './WaypointEditorPopup';
 import FloatingGraphPopup from './FloatingGraphPopup';
@@ -93,6 +93,7 @@ export interface AppUIProps {
   setSelectedZoneId: React.Dispatch<React.SetStateAction<string | null>>;
   selectedCommandMarkerId: string | null;
   setSelectedCommandMarkerId: React.Dispatch<React.SetStateAction<string | null>>;
+  simulationEvents: TriggeredEvent[]; // Add simulationEvents prop
 }
 
 const AppUI: React.FC<AppUIProps> = (props) => {
@@ -114,7 +115,8 @@ const AppUI: React.FC<AppUIProps> = (props) => {
     pendingEventZoneCreation, clearPendingEventZoneCreation,
     pendingCommandMarkerCreation, clearPendingCommandMarkerCreation,
     selectedZoneId, setSelectedZoneId, // Destructure new props
-    selectedCommandMarkerId, setSelectedCommandMarkerId // Destructure new props
+    selectedCommandMarkerId, setSelectedCommandMarkerId, // Destructure new props
+    simulationEvents // Destructure simulationEvents
   } = props;
 
   // Effect to update canvas cursor based on editor mode
@@ -358,6 +360,7 @@ const AppUI: React.FC<AppUIProps> = (props) => {
           onDragStart={handleFloatingGraphMouseDown}
           isVisible={showFloatingGraphs}
           currentTime={displayTime}
+          triggeredEvents={simulationEvents} // Pass to FloatingGraphPopup
       />
 
       {/* Sidebar - Configuration Panel */}

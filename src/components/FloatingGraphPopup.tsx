@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
-import { BarChart2 } from 'lucide-react';
+import { BarChart2, X, LineChart, AreaChart } from 'lucide-react';
 import VelocityTimeChart from './charts/VelocityTimeChart';
 import AccelerationTimeChart from './charts/AccelerationTimeChart';
+import { TriggeredEvent } from '../types';
 
 interface SimulationDataPoint {
   time: number;
@@ -19,6 +20,7 @@ interface FloatingGraphPopupProps {
   onDragStart: (e: React.MouseEvent<HTMLDivElement>) => void;
   isVisible: boolean;
   currentTime: number;
+  triggeredEvents: TriggeredEvent[];
 }
 
 const FloatingGraphPopup: React.FC<FloatingGraphPopupProps> = ({
@@ -28,6 +30,7 @@ const FloatingGraphPopup: React.FC<FloatingGraphPopupProps> = ({
   onDragStart,
   isVisible,
   currentTime,
+  triggeredEvents
 }) => {
   const [showVelocityGraph, setShowVelocityGraph] = useState(true);
   const [showAccelerationGraph, setShowAccelerationGraph] = useState(true);
@@ -87,14 +90,14 @@ const FloatingGraphPopup: React.FC<FloatingGraphPopupProps> = ({
         {showVelocityGraph && (
           <div className="bg-background-primary/50 p-3 rounded-lg shadow-inner min-h-[200px]">
             <div className="relative h-[180px] sm:h-[200px]">
-                <VelocityTimeChart history={velocityHistory} currentTime={currentTime} />
+                <VelocityTimeChart history={velocityHistory} currentTime={currentTime} triggeredEvents={triggeredEvents} />
             </div>
           </div>
         )}
         {showAccelerationGraph && (
           <div className="bg-background-primary/50 p-3 rounded-lg shadow-inner min-h-[200px]">
              <div className="relative h-[180px] sm:h-[200px]">
-                <AccelerationTimeChart history={accelerationHistory} currentTime={currentTime} />
+                <AccelerationTimeChart history={accelerationHistory} currentTime={currentTime} triggeredEvents={triggeredEvents} />
             </div>
           </div>
         )}

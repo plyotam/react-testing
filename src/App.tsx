@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import AppUI, { AppUIProps } from './components/AppUI'; // Import the new UI component
 import { defaultConfig } from './config/appConfig';
-import { SimulationDataPoint, Point, Waypoint, RobotState, OptimizedPathPoint, CommandMarker, EventZone } from './types';
+import { SimulationDataPoint, Point, Waypoint, RobotState, OptimizedPathPoint, CommandMarker, EventZone, TriggeredEvent } from './types';
 import { interpolateAngleDeg, addDataPointToHistory } from './utils/helpers';
 import { generateOptimalPath as generateOptimalPathUtil } from './features/pathfinding/generateOptimalPath';
 import { drawCanvasContent } from './features/canvas/drawCanvas';
@@ -78,6 +78,8 @@ const HolonomicPathOptimizer = () => {
   const [measurePoints, setMeasurePoints] = useState<Point[]>([]);
   const [measuredDistance, setMeasuredDistance] = useState<number | null>(null);
   const [measurePreviewPoint, setMeasurePreviewPoint] = useState<Point | null>(null);
+
+  const [simulationEvents, setSimulationEvents] = useState<TriggeredEvent[]>([]);
 
   const animationFrameIdRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
@@ -284,6 +286,7 @@ const HolonomicPathOptimizer = () => {
     setCommandMarkers([]);
     setTriggeredEnterZones(new Set());
     setActiveWhileInZones(new Set());
+    setSimulationEvents([]);
   };
 
   const exportPath = () => {
@@ -344,6 +347,7 @@ const HolonomicPathOptimizer = () => {
           setSelectedWaypoint(null);
           resetSimulationState();
           setSimulationHistory([]);
+          setSimulationEvents([]);
           if (pathData.commandMarkers) {
             setCommandMarkers(pathData.commandMarkers);
           } else {
@@ -355,6 +359,7 @@ const HolonomicPathOptimizer = () => {
             setEventZones([]);
           }
           setTriggeredEnterZones(new Set());
+          setActiveWhileInZones(new Set());
           showMessage('info', 'Path imported successfully!');
         }
       } catch (error) {
@@ -402,6 +407,7 @@ const HolonomicPathOptimizer = () => {
     setSimulationHistory([]);
     setTriggeredEnterZones(new Set());
     setActiveWhileInZones(new Set());
+    setSimulationEvents([]);
     
     let initialRotation = 0; 
     if (optimizedPath.length > 0) {
@@ -651,11 +657,13 @@ const HolonomicPathOptimizer = () => {
             if (!triggeredEnterZones.has(zone.id)) {
               showMessage('info', `EVENT (onEnter): ${zone.commandName}`);
               setTriggeredEnterZones(prev => new Set(prev).add(zone.id));
+              setSimulationEvents(prev => [...prev, { time: simulatedTimeRef.current, name: zone.commandName, type: 'zoneEnter'}]);
             }
           } else if (zone.triggerType === 'whileInZone') {
             if (!wasActiveInZone) {
               setActiveWhileInZones(prev => new Set(prev).add(zone.id));
               showMessage('info', `EVENT (whileIn - ENTER): ${zone.commandName}`);
+              setSimulationEvents(prev => [...prev, { time: simulatedTimeRef.current, name: zone.commandName, type: 'zoneActiveStart'}]);
             }
           }
         } else {
@@ -665,15 +673,34 @@ const HolonomicPathOptimizer = () => {
               newSet.delete(zone.id);
               return newSet;
             });
+            const exitEventName = zone.onExitCommandName || `Stop ${zone.commandName}`;
             if (zone.onExitCommandName) {
               showMessage('info', `EVENT (whileIn - EXIT): ${zone.onExitCommandName}`);
             } else {
               showMessage('info', `EVENT (whileIn - EXIT IMPLIED): Stop ${zone.commandName}`);
             }
+            setSimulationEvents(prev => [...prev, { time: simulatedTimeRef.current, name: exitEventName, type: 'zoneExit'}]);
           }
         }
       });
       // --- End Event Zone Logic ---
+      
+      // --- Command Marker Trigger Logic ---
+      commandMarkers.forEach(marker => {
+        // Check if the marker's time is crossed in this step
+        // This needs to be a bit robust: if simulation jumps, we might miss it.
+        // A simple check: if previous sim time was before marker time, and current is at or after.
+        const prevSimTime = simulatedTimeRef.current - deltaTime; // Approximate previous time
+        if (marker.time >= prevSimTime && marker.time < simulatedTimeRef.current) {
+          // Check if this marker event has already been added for this exact time to prevent duplicates if deltaTime is very small
+          const alreadyTriggered = simulationEvents.find(event => event.time === marker.time && event.name === marker.commandName && event.type === 'marker');
+          if (!alreadyTriggered) {
+            showMessage('info', `EVENT (marker): ${marker.commandName} at t=${marker.time.toFixed(2)}s`);
+            setSimulationEvents(prev => [...prev, { time: marker.time, name: marker.commandName, type: 'marker'}]);
+          }
+        }
+      });
+      // --- End Command Marker Trigger Logic ---
       
       animationFrameIdRef.current = requestAnimationFrame(simulationStep);
     };
@@ -942,6 +969,7 @@ const HolonomicPathOptimizer = () => {
     lastStoppedWaypointIndexRef.current = null;
     setTriggeredEnterZones(new Set());
     setActiveWhileInZones(new Set());
+    setSimulationEvents([]);
   };
 
   // useEffect for loading default background image
@@ -1110,6 +1138,7 @@ const HolonomicPathOptimizer = () => {
     setSelectedZoneId, // Pass to AppUI for EventZoneEditor
     selectedCommandMarkerId, // Pass to AppUI for CommandMarkerEditor
     setSelectedCommandMarkerId, // Pass to AppUI for CommandMarkerEditor
+    simulationEvents, // Pass simulation events to AppUI
   };
 
   return <AppUI {...appUIProps} />;

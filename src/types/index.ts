@@ -81,3 +81,9 @@ export interface DrawCanvasArgsBase { // Renaming existing to avoid direct confl
   editorMode?: 'waypoints' | 'addEventZoneCenter' | 'addCommandMarker'; // Optional for now, will be made mandatory in drawCanvas.ts
   currentMousePosition?: Point | null; // Point is already defined as {x: number, y: number}
 }
+
+export interface TriggeredEvent {
+  time: number;
+  name: string;
+  type: 'marker' | 'zoneEnter' | 'zoneExit' | 'zoneActiveStart';
+}
