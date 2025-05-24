@@ -1,12 +1,14 @@
 import React from 'react';
-import { Waypoint, Point } from '../../types';
+import { Waypoint, Point, OptimizedPathPoint } from '../../types';
 import { Config } from '../../config/appConfig';
 
 export interface CanvasEventHandlersArgs {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   pixelsToMeters: (pixels: number) => number;
   isMeasuring: boolean;
+  measurePoints: Point[];
   setMeasurePoints: React.Dispatch<React.SetStateAction<Point[]>>;
+  measuredDistance: number | null;
   setMeasuredDistance: React.Dispatch<React.SetStateAction<number | null>>;
   setMeasurePreviewPoint: React.Dispatch<React.SetStateAction<Point | null>>;
   setSelectedWaypoint: React.Dispatch<React.SetStateAction<number | null>>;
@@ -22,21 +24,28 @@ export interface CanvasEventHandlersArgs {
   waypointCreationMode: 'hard' | 'guide';
   config: Config; // For default waypoint properties
   setWaypoints: React.Dispatch<React.SetStateAction<Waypoint[]>>;
-  measurePoints: Point[];
-  measuredDistance: number | null;
   measurePreviewPoint: Point | null;
+
+  // New props for editor modes and entity creation
+  editorMode: 'waypoints' | 'addEventZoneCenter' | 'addCommandMarker';
+  initiatePendingEventZone?: (x: number, y: number) => void;
+  showMessage?: (type: 'error' | 'info' | 'warn', text: string) => void;
+  optimizedPath: OptimizedPathPoint[];
+  initiatePendingCommandMarker?: (s: number, time: number, x: number, y: number) => void;
 }
 
 export const createCanvasEventHandlers = (args: CanvasEventHandlersArgs) => {
   const { 
     canvasRef, pixelsToMeters, isMeasuring, 
     measurePoints, setMeasurePoints, 
-    measuredDistance, setMeasuredDistance, 
+    setMeasuredDistance, 
     measurePreviewPoint, setMeasurePreviewPoint, 
     setSelectedWaypoint, setIsDragging, setDraggingWaypointIndex, 
     waypoints, updateWaypointCoordinates, isDragging, draggingWaypointIndex, 
     mouseDownPosition, setMouseDownPosition, selectedWaypoint, waypointCreationMode, 
-    config, setWaypoints 
+    config, setWaypoints, 
+    editorMode, initiatePendingEventZone, showMessage,
+    optimizedPath, initiatePendingCommandMarker
   } = args;
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -49,6 +58,35 @@ export const createCanvasEventHandlers = (args: CanvasEventHandlersArgs) => {
     const meterY = pixelsToMeters(pixelY);
     
     setMouseDownPosition({ x: pixelX, y: pixelY });
+
+    if (editorMode === 'addEventZoneCenter') {
+      if (initiatePendingEventZone) {
+        initiatePendingEventZone(meterX, meterY); 
+      }
+      return; 
+    }
+
+    if (editorMode === 'addCommandMarker') {
+      if (optimizedPath && optimizedPath.length > 0 && initiatePendingCommandMarker) {
+        let closestPoint: OptimizedPathPoint | null = null;
+        let minDistanceSq = Infinity;
+
+        for (const p of optimizedPath) {
+          const distSq = (p.x - meterX) ** 2 + (p.y - meterY) ** 2;
+          if (distSq < minDistanceSq) {
+            minDistanceSq = distSq;
+            closestPoint = p;
+          }
+        }
+
+        if (closestPoint) {
+          initiatePendingCommandMarker(closestPoint.s, closestPoint.time, closestPoint.x, closestPoint.y);
+        }
+      } else if (showMessage) {
+        showMessage('warn', 'Optimized path must exist to add a command marker.');
+      }
+      return;
+    }
 
     if (isMeasuring) {
       setMeasurePoints(prevPoints => {
@@ -117,7 +155,7 @@ export const createCanvasEventHandlers = (args: CanvasEventHandlersArgs) => {
     if (isDragging) {
       setIsDragging(false);
       setDraggingWaypointIndex(null);
-    } else if (mouseDownPosition) {
+    } else if (mouseDownPosition && editorMode === 'waypoints') {
       const rect = canvas.getBoundingClientRect();
       const upPixelX = e.clientX - rect.left;
       const upPixelY = e.clientY - rect.top;

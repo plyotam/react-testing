@@ -39,11 +39,9 @@ export const generateOptimalPath = (
         const p1 = pathPointsForSpline[i];
         const p2 = pathPointsForSpline[i+1];
         
-        const segmentMidPoint = { x: (p1.x + p2.x) / 2, y: (p1.y + p2.y) / 2 };
         const segmentLength = Math.sqrt((p2.x - p1.x)**2 + (p2.y - p1.y)**2);
 
         const influentialGuides = guideWaypoints.map(gw => {
-          const distToMid = Math.sqrt((gw.x - segmentMidPoint.x)**2 + (gw.y - segmentMidPoint.y)**2);
           const l2 = (p2.x - p1.x)**2 + (p2.y - p1.y)**2;
           if (l2 === 0) return { gw, distSq: Infinity, t: 0, closestPointOnSegment: {...p1} }; 
           let t = ((gw.x - p1.x) * (p2.x - p1.x) + (gw.y - p1.y) * (p2.y - p1.y)) / l2;

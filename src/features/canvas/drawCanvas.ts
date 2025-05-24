@@ -1,5 +1,5 @@
-import React from 'react'; // Required for JSX, even if not directly used in this file
-import { Waypoint, Point, RobotState, OptimizedPathPoint } from '../../types';
+// import React from 'react'; // Removed: Required for JSX, even if not directly used in this file
+import { Waypoint, Point, RobotState, OptimizedPathPoint, EventZone, CommandMarker } from '../../types';
 import { Config } from '../../config/appConfig';
 
 interface DrawCanvasArgs {
@@ -16,6 +16,8 @@ interface DrawCanvasArgs {
   measurePoints: Point[];
   measuredDistance: number | null;
   measurePreviewPoint: Point | null;
+  eventZones: EventZone[];
+  commandMarkers: CommandMarker[];
 }
 
 export const drawCanvasContent = ({
@@ -32,6 +34,8 @@ export const drawCanvasContent = ({
   measurePoints,
   measuredDistance,
   measurePreviewPoint,
+  eventZones,
+  commandMarkers,
 }: DrawCanvasArgs) => {
   const canvasWidth = metersToPixels(config.field.width);
   const canvasHeight = metersToPixels(config.field.height);
@@ -98,10 +102,10 @@ export const drawCanvasContent = ({
     if (waypoint.isGuidePoint) {
       ctx.setLineDash([5, 5]);
       ctx.strokeStyle = isSelected ? config.path.selectedColor : '#8888FF';
-      ctx.fillStyle = isSelected ? config.path.selectedColor + '15' : '#8888FF' + '15';
+      ctx.fillStyle = isSelected ? `${config.path.selectedColor}15` : '#8888FF15';
     } else {
       ctx.strokeStyle = isSelected ? config.path.selectedColor : config.path.waypointBorderColor;
-      ctx.fillStyle = isSelected ? config.path.selectedColor + '20' : config.path.waypointColor + '20';
+      ctx.fillStyle = isSelected ? `${config.path.selectedColor}20` : `${config.path.waypointColor}20`;
     }
     ctx.lineWidth = 2;
     ctx.beginPath();
@@ -195,6 +199,87 @@ export const drawCanvasContent = ({
   ctx.stroke();
   ctx.restore();
   
+  // Draw Event Zones
+  eventZones.forEach(zone => {
+    const zoneX = metersToPixels(zone.x);
+    const zoneY = metersToPixels(zone.y);
+    const zoneRadius = metersToPixels(zone.radius);
+    
+    ctx.save();
+    ctx.strokeStyle = zone.color || 'rgba(255, 165, 0, 0.7)'; // Default orange-ish
+    ctx.fillStyle = zone.color ? zone.color.replace(/[^,]+$/, '0.3)') : 'rgba(255, 165, 0, 0.3)'; // Lighter fill
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(zoneX, zoneY, zoneRadius, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.stroke();
+    
+    // Optional: Draw command name or ID
+    ctx.fillStyle = zone.color || 'rgba(255, 165, 0, 1)';
+    ctx.font = 'bold 10px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(zone.commandName, zoneX, zoneY);
+    ctx.restore();
+  });
+
+  // Draw Command Markers
+  if (optimizedPath.length > 0 && commandMarkers.length > 0) {
+    commandMarkers.forEach(marker => {
+      // Find the closest point on the optimizedPath for this marker's 's' value
+      let closestPathPoint: OptimizedPathPoint | null = null;
+      let minSDiff = Infinity;
+
+      for (const p of optimizedPath) {
+        const sDiff = Math.abs(p.s - marker.s);
+        if (sDiff < minSDiff) {
+          minSDiff = sDiff;
+          closestPathPoint = p;
+        }
+        // Optimization: if path.s exceeds marker.s significantly, can break early if path is dense enough
+        // For simplicity, we iterate through all points or until path.s is much larger.
+        if (p.s > marker.s + config.path.pathResolution * 5 && sDiff > minSDiff) { // Heuristic break
+            // break; // Disabling break for now to ensure we find the true closest for sparse paths
+        }
+      }
+
+      if (closestPathPoint) {
+        const markerX = metersToPixels(closestPathPoint.x);
+        const markerY = metersToPixels(closestPathPoint.y);
+        
+        ctx.save();
+        // Style for command markers (e.g., a small diamond or specific icon)
+        ctx.fillStyle = '#FFD700'; // Gold color
+        ctx.strokeStyle = '#DAA520'; // Darker gold for border
+        ctx.lineWidth = 1.5;
+        
+        // Draw a small diamond shape
+        const size = 6; // pixels
+        ctx.beginPath();
+        ctx.moveTo(markerX, markerY - size);
+        ctx.lineTo(markerX + size, markerY);
+        ctx.lineTo(markerX, markerY + size);
+        ctx.lineTo(markerX - size, markerY);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+        
+        // Optional: Draw command name text next to it
+        ctx.fillStyle = '#ffffff';
+        ctx.font = '9px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        // Simple shadow for text
+        ctx.shadowColor = 'black';
+        ctx.shadowBlur = 2;
+        ctx.fillText(marker.commandName, markerX + size + 3, markerY);
+        ctx.shadowBlur = 0; // Reset shadow
+
+        ctx.restore();
+      }
+    });
+  }
+
   if (isMeasuring) {
     const orangeAccent = config.path.selectedColor || '#f59e0b';
     const lightGreyText = config.path.textPrimary || '#ecf0f1';

@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
-  Download, Upload, Settings, Play, RotateCcw, Trash2, Image, Zap, Target, Square, BarChart2, GripVertical, Ruler
+  Download, Upload, Settings, Play, RotateCcw, Trash2, Image, Zap, Target, Square, BarChart2, GripVertical, Ruler, X
 } from 'lucide-react';
-import { Waypoint, Point, SimulationDataPoint, RobotState, OptimizedPathPoint } from '../types';
+import { Waypoint, SimulationDataPoint, OptimizedPathPoint, CommandMarker, EventZone } from '../types';
 import { Config } from '../config/appConfig';
 import WaypointEditorPopup from './WaypointEditorPopup';
 import FloatingGraphPopup from './FloatingGraphPopup';
 import ConfigInput from './ConfigInput'; // Assuming ConfigInput is also a shared component
+import EventZoneEditor from './EventZoneEditor'; // Import EventZoneEditor
+import CommandMarkerEditor from './CommandMarkerEditor'; // Import CommandMarkerEditor
 
 // Props definition for AppUI
 export interface AppUIProps {
@@ -16,6 +18,8 @@ export interface AppUIProps {
   optimizationMetrics: { totalDistance: number; totalTime: number; /* ... other metrics */ } | null;
   waypointCreationMode: 'hard' | 'guide';
   setWaypointCreationMode: (mode: 'hard' | 'guide') => void;
+  editorMode: 'waypoints' | 'addEventZoneCenter' | 'addCommandMarker';
+  setEditorMode: React.Dispatch<React.SetStateAction<'waypoints' | 'addEventZoneCenter' | 'addCommandMarker'>>;
   isMeasuring: boolean;
   toggleMeasureMode: () => void;
   showFloatingGraphs: boolean;
@@ -55,19 +59,39 @@ export interface AppUIProps {
   simulationHistory: SimulationDataPoint[];
   floatingGraphPosition: { x: number; y: number };
   handleFloatingGraphMouseDown: (e: React.MouseEvent<HTMLDivElement>) => void;
-  message: { type: 'error' | 'info'; text: string } | null;
+  message: { type: 'error' | 'info' | 'warn', text: string } | null;
   handleWaypointDragStart: (e: React.DragEvent<HTMLDivElement>, index: number) => void;
   handleWaypointDragOver: (e: React.DragEvent<HTMLDivElement>, targetIndex: number) => void;
   handleWaypointDragLeave: (e: React.DragEvent<HTMLDivElement>) => void;
   handleWaypointDrop: (e: React.DragEvent<HTMLDivElement>, targetIndex: number) => void;
   handleWaypointDragEnd: () => void;
   draggedWaypointSourceIndex: number | null;
+
+  // Command Markers
+  commandMarkers: CommandMarker[];
+  setCommandMarkers: React.Dispatch<React.SetStateAction<CommandMarker[]>>;
+  onAddCommandMarker: (markerData: Omit<CommandMarker, 'id'>) => void;
+  onUpdateCommandMarker: (marker: CommandMarker) => void;
+  onDeleteCommandMarker: (markerId: string) => void;
+
+  // Event Zones
+  eventZones: EventZone[];
+  setEventZones: React.Dispatch<React.SetStateAction<EventZone[]>>;
+  onAddEventZone: (zoneData: Omit<EventZone, 'id'>) => void; // Add prop for adding
+  onUpdateEventZone: (zone: EventZone) => void; // Add prop for updating
+  onDeleteEventZone: (zoneId: string) => void; // Add prop for deleting
+
   // Add any other props that are used directly by the JSX being moved
+  pendingEventZoneCreation: { x: number, y: number } | null;
+  clearPendingEventZoneCreation: () => void;
+  pendingCommandMarkerCreation: { s: number, time: number, x: number, y: number } | null;
+  clearPendingCommandMarkerCreation: () => void;
 }
 
 const AppUI: React.FC<AppUIProps> = (props) => {
   const {
     pathName, setPathName, waypoints, optimizationMetrics, waypointCreationMode, setWaypointCreationMode,
+    editorMode, setEditorMode,
     isMeasuring, toggleMeasureMode, showFloatingGraphs, setShowFloatingGraphs, imageInputRef, fileInputRef,
     exportPath, isPlaying, stopPath, playPath, optimizedPath, simulationSpeedFactor, setSimulationSpeedFactor,
     clearPath, showConfig, setShowConfig, canvasRef, handleCanvasMouseDown, handleCanvasMouseMove, handleCanvasMouseUp,
@@ -75,8 +99,30 @@ const AppUI: React.FC<AppUIProps> = (props) => {
     loadBackgroundImage, importPath, selectedWaypoint, setSelectedWaypoint, config, setConfig, updateWaypointByIndex,
     deleteWaypoint, editorPosition, handleEditorMouseDown, simulationHistory, floatingGraphPosition, 
     handleFloatingGraphMouseDown, message, handleWaypointDragStart, handleWaypointDragOver, handleWaypointDragLeave,
-    handleWaypointDrop, handleWaypointDragEnd, draggedWaypointSourceIndex
+    handleWaypointDrop, handleWaypointDragEnd, draggedWaypointSourceIndex,
+    commandMarkers, setCommandMarkers, 
+    onAddCommandMarker, onUpdateCommandMarker, onDeleteCommandMarker,
+    eventZones, setEventZones,
+    onAddEventZone, onUpdateEventZone, onDeleteEventZone,
+    pendingEventZoneCreation, clearPendingEventZoneCreation,
+    pendingCommandMarkerCreation, clearPendingCommandMarkerCreation
   } = props;
+
+  // Effect to update canvas cursor based on editor mode
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (canvas) {
+      if (isMeasuring) {
+        canvas.style.cursor = 'crosshair';
+      } else if (editorMode === 'addEventZoneCenter') {
+        canvas.style.cursor = 'cell'; // Typically a plus icon
+      } else if (editorMode === 'addCommandMarker') {
+        canvas.style.cursor = 'copy'; // Often a plus icon, indicates adding/copying to path
+      } else { // Default for waypoints mode or other states
+        canvas.style.cursor = 'crosshair';
+      }
+    }
+  }, [editorMode, isMeasuring, canvasRef]);
 
   return (
     <div className="w-full h-screen bg-background-primary flex text-text-primary font-sans overflow-hidden relative">
@@ -145,6 +191,28 @@ const AppUI: React.FC<AppUIProps> = (props) => {
                   className="p-2 bg-background-tertiary text-text-secondary rounded-lg hover:bg-accent-primary hover:text-white transform hover:scale-105 shadow-md"
                 >
                   <BarChart2 size={20} />
+                </button>
+                <button
+                  onClick={() => setEditorMode('addEventZoneCenter')}
+                  title="Add Event Zone by Clicking on Canvas"
+                  className={`p-2 px-3 transform transition-colors duration-150 ease-in-out shadow-md rounded-lg 
+                              ${editorMode === 'addEventZoneCenter' 
+                                ? 'bg-accent-warning text-white' 
+                                : 'bg-background-tertiary text-text-secondary hover:bg-accent-warning'}`}
+                >
+                  Add Zone (Canvas)
+                </button>
+                <button
+                  onClick={() => setEditorMode('addCommandMarker')}
+                  title="Add Command Marker by Clicking on Path"
+                  disabled={optimizedPath.length === 0}
+                  className={`p-2 px-3 transform transition-colors duration-150 ease-in-out shadow-md rounded-lg 
+                              ${editorMode === 'addCommandMarker' 
+                                ? 'bg-accent-info text-white'
+                                : 'bg-background-tertiary text-text-secondary hover:bg-accent-info'} 
+                              ${optimizedPath.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
+                >
+                  Add Marker (Path)
                 </button>
               </div>
               <div className="flex gap-2">
@@ -216,7 +284,7 @@ const AppUI: React.FC<AppUIProps> = (props) => {
               onMouseMove={handleCanvasMouseMove}
               onMouseUp={handleCanvasMouseUp}
               onMouseLeave={handleCanvasMouseLeave}
-              className="border-2 border-border-color rounded-md cursor-crosshair object-contain"
+              className="border-2 border-border-color-primary rounded-md object-contain"
             />
           </div>
 
@@ -283,9 +351,29 @@ const AppUI: React.FC<AppUIProps> = (props) => {
           currentTime={displayTime}
       />
 
-      {/* Sidebar */}
+      {/* Sidebar - Configuration Panel */}
       {showConfig && (
-        <div className={`w-96 bg-background-secondary shadow-xl p-6 space-y-5 overflow-y-auto transition-all duration-300 ease-in-out ${showConfig ? 'mr-0' : '-mr-96 opacity-0'}`}>
+        <div 
+          className="absolute top-0 left-0 h-full w-[450px] bg-background-secondary shadow-2xl p-5 overflow-y-auto 
+                     transform transition-all duration-300 ease-in-out z-30 flex flex-col 
+                     border-r border-border-color-primary"
+          style={{ transform: `translate(${editorPosition.x}px, ${editorPosition.y}px)` }}
+        >
+          <div 
+            className="flex justify-between items-center pb-2 mb-3 border-b border-border-color-secondary cursor-move select-none"
+            onMouseDown={handleEditorMouseDown}
+          >
+            <h2 className="text-xl font-semibold text-text-primary">Configuration & Tools</h2>
+            <button 
+              onClick={() => setShowConfig(false)} 
+              className="p-1 rounded-md text-text-secondary hover:bg-background-hover-muted hover:text-text-primary transition-colors"
+              title="Close Configuration"
+            >
+              <X size={22} />
+            </button>
+          </div>
+          
+          {/* Tab Navigation */}
           <div className="bg-background-tertiary/50 rounded-xl shadow-lg p-5 space-y-4 backdrop-blur-sm">
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-accent-primary">
               <Settings size={20} />
@@ -383,12 +471,37 @@ const AppUI: React.FC<AppUIProps> = (props) => {
                 )}
             </div>
           </div>
+
+          {/* Section for Command Markers */}
+          <div className="bg-background-tertiary/50 rounded-xl shadow-lg p-5 backdrop-blur-sm mt-5">
+            <CommandMarkerEditor 
+              commandMarkers={commandMarkers}
+              optimizedPath={optimizedPath}
+              onAddCommandMarker={onAddCommandMarker}
+              onUpdateCommandMarker={onUpdateCommandMarker}
+              onDeleteCommandMarker={onDeleteCommandMarker}
+              pendingCommandMarkerCreation={pendingCommandMarkerCreation}
+              clearPendingCommandMarkerCreation={clearPendingCommandMarkerCreation}
+            />
+          </div>
+
+          {/* Section for Event Zones */}
+          <div className="bg-background-tertiary/50 rounded-xl shadow-lg p-5 backdrop-blur-sm mt-5">
+            <EventZoneEditor 
+              eventZones={eventZones}
+              onAddEventZone={onAddEventZone}
+              onUpdateEventZone={onUpdateEventZone}
+              onDeleteEventZone={onDeleteEventZone}
+              pendingEventZoneCreation={pendingEventZoneCreation}
+              clearPendingEventZoneCreation={clearPendingEventZoneCreation}
+            />
+          </div>
         </div>
       )}
 
       {/* Message Box */}
       {message && (
-        <div className={`fixed top-5 right-5 p-4 rounded-lg shadow-xl text-white text-sm z-50 transform transition-all duration-300 ease-in-out hover:scale-105 ${message.type === 'error' ? 'bg-error-color' : 'bg-gradient-accent'}`}>
+        <div className={`fixed top-5 right-5 p-4 rounded-lg shadow-xl text-white text-sm z-50 transform transition-all duration-300 ease-in-out hover:scale-105 ${message.type === 'error' ? 'bg-error-color' : message.type === 'warn' ? 'bg-warning-color' : 'bg-gradient-accent'}`}>
           {message.text}
         </div>
       )}

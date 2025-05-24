@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import AppUI, { AppUIProps } from './components/AppUI'; // Import the new UI component
 import { defaultConfig } from './config/appConfig';
-import { SimulationDataPoint, Point, Waypoint, RobotState, OptimizedPathPoint } from './types';
-import { normalizeAngleDeg, interpolateAngleDeg, addDataPointToHistory } from './utils/helpers';
+import { SimulationDataPoint, Point, Waypoint, RobotState, OptimizedPathPoint, CommandMarker, EventZone } from './types';
+import { interpolateAngleDeg, addDataPointToHistory } from './utils/helpers';
 import { generateOptimalPath as generateOptimalPathUtil } from './features/pathfinding/generateOptimalPath';
 import { drawCanvasContent } from './features/canvas/drawCanvas';
 import { createCanvasEventHandlers } from './features/canvas/canvasEventHandlers';
+import { v4 as uuidv4 } from 'uuid'; // Import uuid
 
 const HolonomicPathOptimizer = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -30,7 +31,7 @@ const HolonomicPathOptimizer = () => {
     maxAcceleration: number;
     energyConsumption: number;
   } | null>(null);
-  const [message, setMessage] = useState<{ type: 'error' | 'info', text: string } | null>(null);
+  const [message, setMessage] = useState<{ type: 'error' | 'info' | 'warn', text: string } | null>(null);
   const [simulationSpeedFactor, setSimulationSpeedFactor] = useState(1); // 1x, 2x, 4x
   const [waypointSHeadings, setWaypointSHeadings] = useState<{s: number, heading: number}[]>([]);
   const [simulationHistory, setSimulationHistory] = useState<SimulationDataPoint[]>([]);
@@ -38,6 +39,13 @@ const HolonomicPathOptimizer = () => {
   const [isDragging, setIsDragging] = useState(false);
   const [mouseDownPosition, setMouseDownPosition] = useState<{ x: number, y: number } | null>(null);
   const [waypointCreationMode, setWaypointCreationMode] = useState<'hard' | 'guide'>('hard');
+  const [commandMarkers, setCommandMarkers] = useState<CommandMarker[]>([]);
+  const [eventZones, setEventZones] = useState<EventZone[]>([]);
+  const [triggeredEnterZones, setTriggeredEnterZones] = useState<Set<string>>(new Set());
+  const [activeWhileInZones, setActiveWhileInZones] = useState<Set<string>>(new Set());
+  const [editorMode, setEditorMode] = useState<'waypoints' | 'addEventZoneCenter' | 'addCommandMarker'>('waypoints');
+  const [pendingEventZoneCreation, setPendingEventZoneCreation] = useState<{ x: number, y: number } | null>(null);
+  const [pendingCommandMarkerCreation, setPendingCommandMarkerCreation] = useState<{ s: number, time: number, x: number, y: number } | null>(null);
 
   const [editorPosition, setEditorPosition] = useState({ x: 50, y: 150 });
   const [isDraggingEditor, setIsDraggingEditor] = useState(false);
@@ -65,17 +73,8 @@ const HolonomicPathOptimizer = () => {
   const isPausedForStopPointRef = useRef<boolean>(false);
   const lastStoppedWaypointIndexRef = useRef<number | null>(null);
 
-  const resetSimulationState = () => {
-    setIsPlaying(false);
-    currentPathIndexRef.current = 0;
-    simulatedTimeRef.current = 0;
-    setDisplayTime(0);
-    lastTimestampRef.current = null;
-    isPausedForStopPointRef.current = false;
-    lastStoppedWaypointIndexRef.current = null;
-  };
-
-  const showMessage = useCallback((type: 'error' | 'info', text: string) => {
+  // ALL HANDLER FUNCTIONS TO BE GROUPED HERE
+  const showMessage = useCallback((type: 'error' | 'info' | 'warn', text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage(null), 3000);
   }, []);
@@ -92,6 +91,57 @@ const HolonomicPathOptimizer = () => {
     });
   }, []);
 
+  const addCommandMarker = (markerData: Omit<CommandMarker, 'id'>) => {
+    const newMarker: CommandMarker = {
+      ...markerData,
+      id: uuidv4(),
+    };
+    setCommandMarkers(prev => [...prev, newMarker].sort((a,b) => a.s - b.s));
+  };
+
+  const updateCommandMarker = (updatedMarker: CommandMarker) => {
+    setCommandMarkers(prev => 
+      prev.map(marker => marker.id === updatedMarker.id ? updatedMarker : marker)
+        .sort((a,b) => a.s - b.s)
+    );
+  };
+
+  const deleteCommandMarker = (markerId: string) => {
+    setCommandMarkers(prev => prev.filter(marker => marker.id !== markerId));
+  };
+
+  const addEventZone = (zoneData: Omit<EventZone, 'id'>) => {
+    const newZone: EventZone = {
+      ...zoneData,
+      id: uuidv4(),
+    };
+    setEventZones(prev => [...prev, newZone]);
+  };
+
+  const updateEventZone = (updatedZone: EventZone) => {
+    setEventZones(prev => prev.map(zone => zone.id === updatedZone.id ? updatedZone : zone));
+  };
+
+  const deleteEventZone = (zoneId: string) => {
+    setEventZones(prev => prev.filter(zone => zone.id !== zoneId));
+  };
+
+  const initiatePendingEventZone = (x: number, y: number) => {
+    setPendingEventZoneCreation({ x, y });
+    setEditorMode('waypoints');
+    setShowConfig(true);
+    if (showMessage) showMessage('info', 'Click on the canvas placed Event Zone. Now edit details in the sidebar.');
+  };
+
+  const initiatePendingCommandMarker = (s: number, time: number, x: number, y: number) => {
+    setPendingCommandMarkerCreation({ s, time, x, y });
+    setEditorMode('waypoints');
+    setShowConfig(true);
+    if (showMessage) showMessage('info', `Clicked path at s=${s.toFixed(2)}m, t=${time.toFixed(2)}s. Edit marker details.`);
+  };
+  // END OF HANDLER FUNCTIONS GROUP
+
+  // useEffect for path generation (depends on waypoints, config, showMessage)
   useEffect(() => {
     if (waypoints.length >= 2) {
       const { path: newPath, metrics: newMetrics } = generateOptimalPathUtil(waypoints, config, showMessage);
@@ -125,77 +175,7 @@ const HolonomicPathOptimizer = () => {
       setOptimizationMetrics(null);
       setWaypointSHeadings([]);
     }
-  }, [waypoints, config, showMessage]);
-
-  useEffect(() => {
-    const defaultBgPath = 'fields/field25.png';
-    const img = new window.Image();
-    img.onload = () => {
-      setBackgroundImage(img);
-      const canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.drawImage(img, 0, 0);
-        const dataUrl = canvas.toDataURL('image/png');
-        setConfig(prev => ({
-          ...prev,
-          field: { ...prev.field, backgroundImage: dataUrl }
-        }));
-        showMessage('info', 'Default background loaded.');
-      } else {
-        showMessage('error', 'Could not process default background for config.');
-      }
-    };
-    img.onerror = () => {
-      showMessage('error', `Default background ${defaultBgPath} not found. Place it in public/fields/`);
-    };
-    img.src = defaultBgPath;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const canvasWidth = metersToPixels(config.field.width);
-    const canvasHeight = metersToPixels(config.field.height);
-    if (canvas.width !== canvasWidth) canvas.width = canvasWidth;
-    if (canvas.height !== canvasHeight) canvas.height = canvasHeight;
-
-    drawCanvasContent({
-      canvas,
-      ctx,
-      config,
-      waypoints,
-      selectedWaypoint,
-      robotState,
-      optimizedPath,
-      backgroundImage,
-      metersToPixels,
-      isMeasuring,
-      measurePoints,
-      measuredDistance,
-      measurePreviewPoint,
-    });
-  }, [
-    config, 
-    waypoints, 
-    selectedWaypoint, 
-    robotState, 
-    optimizedPath, 
-    backgroundImage, 
-    metersToPixels, 
-    isMeasuring, 
-    measurePoints, 
-    measuredDistance, 
-    measurePreviewPoint,
-    canvasRef
-  ]);
+  }, [waypoints, config, showMessage]); // showMessage is a dependency here
 
   const { 
     handleCanvasMouseDown, 
@@ -222,9 +202,14 @@ const HolonomicPathOptimizer = () => {
     mouseDownPosition,
     setMouseDownPosition,
     selectedWaypoint,
-    waypointCreationMode,
+    waypointCreationMode, 
     config,
-    setWaypoints
+    setWaypoints,
+    editorMode, 
+    initiatePendingEventZone,
+    showMessage,
+    optimizedPath,
+    initiatePendingCommandMarker,
   });
 
   const deleteWaypoint = (index: number) => {
@@ -241,6 +226,10 @@ const HolonomicPathOptimizer = () => {
     setOptimizationMetrics(null);
     resetSimulationState();
     setSimulationHistory([]);
+    setEventZones([]);
+    setCommandMarkers([]);
+    setTriggeredEnterZones(new Set());
+    setActiveWhileInZones(new Set());
   };
 
   const exportPath = () => {
@@ -248,6 +237,8 @@ const HolonomicPathOptimizer = () => {
       name: pathName,
       waypoints,
       optimizedPath,
+      commandMarkers,
+      eventZones,
       config,
       metrics: optimizationMetrics,
       metadata: {
@@ -299,6 +290,17 @@ const HolonomicPathOptimizer = () => {
           setSelectedWaypoint(null);
           resetSimulationState();
           setSimulationHistory([]);
+          if (pathData.commandMarkers) {
+            setCommandMarkers(pathData.commandMarkers);
+          } else {
+            setCommandMarkers([]);
+          }
+          if (pathData.eventZones) {
+            setEventZones(pathData.eventZones);
+          } else {
+            setEventZones([]);
+          }
+          setTriggeredEnterZones(new Set());
           showMessage('info', 'Path imported successfully!');
         }
       } catch (error) {
@@ -344,6 +346,8 @@ const HolonomicPathOptimizer = () => {
       return;
     }
     setSimulationHistory([]);
+    setTriggeredEnterZones(new Set());
+    setActiveWhileInZones(new Set());
     
     let initialRotation = 0; 
     if (optimizedPath.length > 0) {
@@ -577,6 +581,46 @@ const HolonomicPathOptimizer = () => {
         angularVelocity: 0
       });
       
+      // --- Event Zone Logic ---
+      const currentRobotX = currentPathPoint.x;
+      const currentRobotY = currentPathPoint.y;
+
+      eventZones.forEach(zone => {
+        const distanceToZoneCenter = Math.sqrt(
+          (currentRobotX - zone.x) ** 2 + (currentRobotY - zone.y) ** 2
+        );
+        const robotIsInsideZone = distanceToZoneCenter <= zone.radius;
+        const wasActiveInZone = activeWhileInZones.has(zone.id);
+
+        if (robotIsInsideZone) {
+          if (zone.triggerType === 'onEnter') {
+            if (!triggeredEnterZones.has(zone.id)) {
+              showMessage('info', `EVENT (onEnter): ${zone.commandName}`);
+              setTriggeredEnterZones(prev => new Set(prev).add(zone.id));
+            }
+          } else if (zone.triggerType === 'whileInZone') {
+            if (!wasActiveInZone) {
+              setActiveWhileInZones(prev => new Set(prev).add(zone.id));
+              showMessage('info', `EVENT (whileIn - ENTER): ${zone.commandName}`);
+            }
+          }
+        } else {
+          if (zone.triggerType === 'whileInZone' && wasActiveInZone) {
+            setActiveWhileInZones(prev => {
+              const newSet = new Set(prev);
+              newSet.delete(zone.id);
+              return newSet;
+            });
+            if (zone.onExitCommandName) {
+              showMessage('info', `EVENT (whileIn - EXIT): ${zone.onExitCommandName}`);
+            } else {
+              showMessage('info', `EVENT (whileIn - EXIT IMPLIED): Stop ${zone.commandName}`);
+            }
+          }
+        }
+      });
+      // --- End Event Zone Logic ---
+      
       animationFrameIdRef.current = requestAnimationFrame(simulationStep);
     };
 
@@ -591,7 +635,20 @@ const HolonomicPathOptimizer = () => {
       }
       lastTimestampRef.current = null; 
     };
-  }, [isPlaying, optimizedPath, waypoints, config.waypoint.defaultStopDuration, simulationSpeedFactor, showMessage, interpolateAngleDeg, robotState.rotation, waypointSHeadings, addDataPointToHistory, isScrubbing]);
+  }, [
+    isPlaying, 
+    optimizedPath, 
+    waypoints, 
+    config.waypoint.defaultStopDuration, 
+    simulationSpeedFactor, 
+    showMessage, 
+    robotState.rotation, 
+    waypointSHeadings, 
+    isScrubbing, 
+    activeWhileInZones,
+    eventZones,
+    triggeredEnterZones
+  ]);
 
   const updateWaypointByIndex = (index: number, field: keyof Waypoint, value: any) => {
     if (index < 0 || index >= waypoints.length) return;
@@ -745,7 +802,7 @@ const HolonomicPathOptimizer = () => {
         setRobotState({
             x: optimizedPath[0].x,
             y: optimizedPath[0].y,
-            rotation: optimizedPath[0].heading,
+            rotation: optimizedPath[0].heading || 0,
             velocity: optimizedPath[0].velocity,
             angularVelocity: 0
         });
@@ -821,11 +878,109 @@ const HolonomicPathOptimizer = () => {
     });
   };
 
+  const resetSimulationState = () => {
+    setIsPlaying(false);
+    currentPathIndexRef.current = 0;
+    simulatedTimeRef.current = 0;
+    setDisplayTime(0);
+    lastTimestampRef.current = null;
+    isPausedForStopPointRef.current = false;
+    lastStoppedWaypointIndexRef.current = null;
+    setTriggeredEnterZones(new Set());
+    setActiveWhileInZones(new Set());
+  };
+
+  // useEffect for loading default background image
+  useEffect(() => {
+    const defaultBgPath = 'fields/field25.png'; // Ensure this path is correct relative to your public folder
+    const img = new window.Image();
+    img.onload = () => {
+      setBackgroundImage(img);
+      // Create a data URL to store in config, only if it wasn't loaded from config initially
+      // This part might need refinement based on how backgroundImage interacts with config.field.backgroundImage
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        const dataUrl = canvas.toDataURL('image/png');
+        // Only update config if the background wasn't already set from an import
+        if (!config.field.backgroundImage || config.field.backgroundImage === 'fields/field25.png') {
+            setConfig(prev => ({
+                ...prev,
+                field: { ...prev.field, backgroundImage: dataUrl }
+            }));
+        }
+        showMessage('info', 'Default background loaded.');
+      } else {
+        showMessage('error', 'Could not process default background for config.');
+      }
+    };
+    img.onerror = () => {
+      showMessage('error', `Default background ${defaultBgPath} not found. Place it in public/fields/`);
+    };
+    img.src = defaultBgPath;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showMessage]); // Keep minimal dependencies, setConfig is stable if not included
+
+  // useEffect for drawing canvas content
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const canvasWidth = metersToPixels(config.field.width);
+    const canvasHeight = metersToPixels(config.field.height);
+    if (canvas.width !== canvasWidth) canvas.width = canvasWidth;
+    if (canvas.height !== canvasHeight) canvas.height = canvasHeight;
+
+    drawCanvasContent({
+      canvas,
+      ctx,
+      config,
+      waypoints,
+      selectedWaypoint,
+      robotState,
+      optimizedPath,
+      backgroundImage,
+      metersToPixels,
+      isMeasuring,
+      measurePoints,
+      measuredDistance,
+      measurePreviewPoint,
+      eventZones, 
+      commandMarkers,
+    });
+  }, [
+    config, 
+    waypoints, 
+    selectedWaypoint, 
+    robotState, 
+    optimizedPath, 
+    backgroundImage, 
+    metersToPixels, // This is a useCallback, stable if its own deps are stable
+    isMeasuring, 
+    measurePoints, 
+    measuredDistance, 
+    measurePreviewPoint,
+    eventZones, 
+    commandMarkers,
+    canvasRef // Though canvasRef itself doesn't change, its availability might gate the effect
+  ]);
+
   // Prepare props for AppUI
   const appUIProps: AppUIProps = {
     pathName, setPathName,
     waypoints, optimizationMetrics,
     waypointCreationMode, setWaypointCreationMode,
+    editorMode, setEditorMode,
+    pendingEventZoneCreation,
+    clearPendingEventZoneCreation: () => setPendingEventZoneCreation(null),
+    pendingCommandMarkerCreation,
+    clearPendingCommandMarkerCreation: () => setPendingCommandMarkerCreation(null),
     isMeasuring, toggleMeasureMode,
     showFloatingGraphs, setShowFloatingGraphs,
     imageInputRef, fileInputRef,
@@ -843,6 +998,14 @@ const HolonomicPathOptimizer = () => {
     message,
     handleWaypointDragStart, handleWaypointDragOver, handleWaypointDragLeave, handleWaypointDrop, handleWaypointDragEnd,
     draggedWaypointSourceIndex,
+    commandMarkers, setCommandMarkers,
+    eventZones, setEventZones,
+    onAddCommandMarker: addCommandMarker,
+    onUpdateCommandMarker: updateCommandMarker,
+    onDeleteCommandMarker: deleteCommandMarker,
+    onAddEventZone: addEventZone,
+    onUpdateEventZone: updateEventZone,
+    onDeleteEventZone: deleteEventZone,
   };
 
   return <AppUI {...appUIProps} />;
