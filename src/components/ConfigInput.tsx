@@ -24,7 +24,7 @@ const ConfigInput: React.FC<ConfigInputProps> = ({
   className = '' 
 }) => (
   <div className={`flex items-center justify-between ${className}`}>
-    <label className="text-sm text-text-secondary">{label}:</label>
+    <label className="text-sm font-medium text-text-secondary">{label}:</label>
     <div className="flex items-center gap-1">
       <input
         type={type}
@@ -33,9 +33,9 @@ const ConfigInput: React.FC<ConfigInputProps> = ({
         max={max}
         value={value}
         onChange={onChange}
-        className="w-24 px-2 py-1 border border-background-primary rounded text-sm bg-text-primary text-background-primary text-right"
+        className="w-24 px-3 py-2 border border-border-color-secondary rounded text-sm bg-input-background text-text-primary text-right shadow-sm focus:ring-accent-primary focus:border-accent-primary"
       />
-      {unit && <span className="text-text-secondary text-xs">{unit}</span>}
+      {unit && <span className="text-text-secondary text-xs pl-1">{unit}</span>} {/* Adjusted unit padding slightly */}
     </div>
   </div>
 );

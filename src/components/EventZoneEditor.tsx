@@ -189,16 +189,19 @@ const EventZoneEditor: React.FC<EventZoneEditorProps> = ({
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-between items-center">
-        <h3 className="font-bold text-lg text-accent-secondary">Event Zones</h3>
-        <button 
-          onClick={handleStartCreate} 
-          className="p-2 rounded-md bg-accent-secondary text-white hover:bg-accent-primary flex items-center text-sm"
+      {/* Standardized Header */}
+      <h3 className="text-lg font-semibold text-text-primary mb-3 border-b border-border-color-primary pb-1">Event Zones</h3>
+      
+      {/* "Add New Zone" button, shown only when no form is active */}
+      {(!isCreatingNew && !editingZone) && (
+        <button
+          onClick={handleStartCreate}
+          className="w-full flex items-center justify-center bg-accent-success text-white py-2 px-4 rounded-md hover:bg-opacity-80 transition-colors duration-150 ease-in-out mb-3 shadow disabled:opacity-50 disabled:cursor-not-allowed"
           title="Add New Event Zone"
         >
-          <PlusCircle size={16} className="mr-1" /> Add Zone
+          <PlusCircle size={18} className="mr-2" /> Add New Zone
         </button>
-      </div>
+      )}
 
       {(isCreatingNew || editingZone) && renderZoneForm()}
 

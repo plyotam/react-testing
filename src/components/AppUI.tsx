@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import {
-  Download, Upload, Settings, Play, RotateCcw, Trash2, Image, Zap, Target, Square, BarChart2, GripVertical, Ruler, X
+  Download, Upload, Settings, Play, RotateCcw, Trash2, Image, Zap, Target, Square, BarChart2, GripVertical, Ruler, X,
+  LayoutGrid, ToyBrick, GitFork // Added new icons
 } from 'lucide-react';
 import { Waypoint, SimulationDataPoint, OptimizedPathPoint, CommandMarker, EventZone } from '../types';
 import { Config } from '../config/appConfig';
@@ -369,9 +370,12 @@ const AppUI: React.FC<AppUIProps> = (props) => {
         >
           <div 
             className="flex justify-between items-center pb-2 mb-3 border-b border-border-color-secondary cursor-move select-none"
-            onMouseDown={handleEditorMouseDown}
+            onMouseDown={handleEditorMouseDown} // This makes the whole header draggable
           >
-            <h2 className="text-xl font-semibold text-text-primary">Configuration & Tools</h2>
+            <div className="flex items-center"> {/* Group icon and title */}
+              <GripVertical size={20} className="mr-2 text-text-tertiary" /> {/* Added Grip Icon */}
+              <h2 className="text-xl font-semibold text-text-primary">Configuration & Tools</h2>
+            </div>
             <button 
               onClick={() => setShowConfig(false)} 
               className="p-1 rounded-md text-text-secondary hover:bg-background-hover-muted hover:text-text-primary transition-colors"
@@ -388,18 +392,18 @@ const AppUI: React.FC<AppUIProps> = (props) => {
               Configuration
             </h3>
             <div className="space-y-2 pt-3 border-t border-border-color/50">
-              <h4 className="font-semibold text-text-secondary mt-2">Field Settings</h4>
+              <h4 className="flex items-center font-semibold text-text-primary mb-1"><LayoutGrid size={18} className="mr-2 text-accent-secondary" />Field Settings</h4>
               <ConfigInput label="Width" value={config.field.width} onChange={(e) => setConfig(prev => ({ ...prev, field: { ...prev.field, width: parseFloat(e.target.value) } }))} unit="m" className="mb-1" />
               <ConfigInput label="Height" value={config.field.height} onChange={(e) => setConfig(prev => ({ ...prev, field: { ...prev.field, height: parseFloat(e.target.value) } }))} unit="m" className="mb-1" />
               <ConfigInput label="Pixels/Meter" value={config.field.pixelsPerMeter} onChange={(e) => setConfig(prev => ({ ...prev, field: { ...prev.field, pixelsPerMeter: parseFloat(e.target.value) } }))} unit="px/m" className="mb-1" />
               <div className="flex items-center justify-between py-1">
                 <label className="text-sm text-text-secondary">Show Grid:</label>
-                <input type="checkbox" checked={config.field.showGrid} onChange={(e) => setConfig(prev => ({ ...prev, field: { ...prev.field, showGrid: e.target.checked } }))} className="mr-2 h-4 w-4 text-accent-primary rounded-sm focus:ring-accent-secondary bg-text-primary border-border-color" />
+                <input type="checkbox" checked={config.field.showGrid} onChange={(e) => setConfig(prev => ({ ...prev, field: { ...prev.field, showGrid: e.target.checked } }))} className="mr-2 h-5 w-5 text-accent-primary rounded-sm focus:ring-accent-secondary bg-input-background border-border-color-secondary" />
               </div>
               <ConfigInput label="Grid Spacing" value={config.field.gridSpacing} onChange={(e) => setConfig(prev => ({ ...prev, field: { ...prev.field, gridSpacing: parseFloat(e.target.value) } }))} unit="m" className="mb-1" />
             </div>
             <div className="space-y-2 pt-3 border-t border-border-color/50">
-              <h4 className="font-semibold text-text-secondary mt-2">Robot Settings</h4>
+              <h4 className="flex items-center font-semibold text-text-primary mb-1"><ToyBrick size={18} className="mr-2 text-accent-secondary" />Robot Settings</h4>
               <ConfigInput label="Radius" value={config.robot.radius} onChange={(e) => setConfig(prev => ({ ...prev, robot: { ...prev.robot, radius: parseFloat(e.target.value) } }))} unit="m" className="mb-1" />
               <ConfigInput label="Mass" value={config.robot.mass} onChange={(e) => setConfig(prev => ({ ...prev, robot: { ...prev.robot, mass: parseFloat(e.target.value) } }))} unit="kg" className="mb-1" />
               <ConfigInput label="Max Velocity" value={config.robot.maxVelocity} onChange={(e) => setConfig(prev => ({ ...prev, robot: { ...prev.robot, maxVelocity: parseFloat(e.target.value) } }))} unit="m/s" className="mb-1" />
@@ -408,14 +412,14 @@ const AppUI: React.FC<AppUIProps> = (props) => {
               <ConfigInput label="Max Angular Acceleration" value={config.robot.maxAngularAcceleration} onChange={(e) => setConfig(prev => ({ ...prev, robot: { ...prev.robot, maxAngularAcceleration: parseFloat(e.target.value) } }))} unit="deg/s²" className="mb-1" />
             </div>
             <div className="space-y-2 pt-3 border-t border-border-color/50">
-              <h4 className="font-semibold text-text-secondary mt-2">Path Settings</h4>
+              <h4 className="flex items-center font-semibold text-text-primary mb-1"><GitFork size={18} className="mr-2 text-accent-secondary" />Path Settings</h4>
               <div className="flex items-center justify-between py-1">
                 <label htmlFor="splineType" className="text-sm text-text-secondary">Spline Type:</label>
                 <select 
                   id="splineType"
                   value={config.path.splineType}
                   onChange={(e) => setConfig(prev => ({ ...prev, path: { ...prev.path, splineType: e.target.value as 'cubic' | 'quintic' } }))}
-                  className="bg-background-primary border border-border-color text-text-primary text-sm rounded-md focus:ring-accent-primary focus:border-accent-primary p-1.5 w-1/2 shadow-sm"
+                  className="bg-input-background border border-border-color-secondary text-text-primary text-sm rounded-md focus:ring-accent-primary focus:border-accent-primary px-3 py-2 w-1/2 shadow-sm"
                 >
                   <option value="cubic">Cubic</option>
                   <option value="quintic">Quintic</option>
@@ -426,7 +430,7 @@ const AppUI: React.FC<AppUIProps> = (props) => {
               <ConfigInput label="Path Width" type="number" value={config.path.width} onChange={(e) => setConfig(prev => ({ ...prev, path: { ...prev.path, width: parseInt(e.target.value, 10) } }))} unit="px" className="mb-1" />
               <div className="flex items-center justify-between py-1">
                 <label className="text-sm text-text-secondary">Velocity Visualization:</label>
-                <input type="checkbox" checked={config.path.velocityVisualization} onChange={(e) => setConfig(prev => ({ ...prev, path: { ...prev.path, velocityVisualization: e.target.checked } }))} className="mr-2 h-4 w-4 text-accent-primary rounded-sm focus:ring-accent-secondary bg-text-primary border-border-color" />
+                <input type="checkbox" checked={config.path.velocityVisualization} onChange={(e) => setConfig(prev => ({ ...prev, path: { ...prev.path, velocityVisualization: e.target.checked } }))} className="mr-2 h-5 w-5 text-accent-primary rounded-sm focus:ring-accent-secondary bg-input-background border-border-color-secondary" />
               </div>
             </div>
           </div>
@@ -482,6 +486,7 @@ const AppUI: React.FC<AppUIProps> = (props) => {
 
           {/* Section for Command Markers */}
           <div className="bg-background-tertiary/50 rounded-xl shadow-lg p-5 backdrop-blur-sm mt-5">
+            <h3 className="font-bold text-lg mb-4 text-accent-primary">Command Markers</h3>
             <CommandMarkerEditor 
               commandMarkers={commandMarkers}
               optimizedPath={optimizedPath}
@@ -497,6 +502,7 @@ const AppUI: React.FC<AppUIProps> = (props) => {
 
           {/* Section for Event Zones */}
           <div className="bg-background-tertiary/50 rounded-xl shadow-lg p-5 backdrop-blur-sm mt-5">
+            <h3 className="font-bold text-lg mb-4 text-accent-primary">Event Zones</h3>
             <EventZoneEditor 
               eventZones={eventZones}
               onAddEventZone={onAddEventZone}

@@ -53,7 +53,14 @@ const HolonomicPathOptimizer = () => {
   const [selectedCommandMarkerId, setSelectedCommandMarkerId] = useState<string | null>(null);
   const [draggingCommandMarkerId, setDraggingCommandMarkerId] = useState<string | null>(null);
 
-  const [editorPosition, setEditorPosition] = useState({ x: 50, y: 150 });
+  const [editorPosition, setEditorPosition] = useState(() => {
+    const panelWidth = 450; // As defined in AppUI.tsx w-[450px]
+    const rightPadding = 50; // Desired padding from the right edge
+    // Ensure window is defined (for SSR or non-browser environments during testing)
+    const currentWindowWidth = typeof window !== 'undefined' ? window.innerWidth : 1024; // Default width
+    const defaultX = currentWindowWidth - panelWidth - rightPadding;
+    return { x: defaultX > 0 ? defaultX : 50, y: 150 }; // Ensure x is not negative
+  });
   const [isDraggingEditor, setIsDraggingEditor] = useState(false);
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
 
