@@ -94,6 +94,7 @@ const HolonomicPathOptimizer = () => {
   } | null>(null);
   const [message, setMessage] = useState<{ type: 'error' | 'info', text: string } | null>(null);
   const [simulationSpeedFactor, setSimulationSpeedFactor] = useState(1); // 1x, 2x, 4x
+  const [waypointSHeadings, setWaypointSHeadings] = useState<{s: number, heading: number}[]>([]);
 
   // Animation frame ID ref
   const animationFrameIdRef = useRef<number | null>(null);
@@ -113,6 +114,29 @@ const HolonomicPathOptimizer = () => {
   const metersToPixels = useCallback((meters: number) => meters * config.field.pixelsPerMeter, [config.field.pixelsPerMeter]);
   const pixelsToMeters = useCallback((pixels: number) => pixels / config.field.pixelsPerMeter, [config.field.pixelsPerMeter]);
   
+  // Helper functions for angle interpolation
+  const normalizeAngleDeg = useCallback((angle: number): number => { // Normalize to [-180, 180)
+    let result = angle % 360;
+    if (result <= -180) result += 360;
+    if (result > 180) result -= 360; 
+    result = (angle % 360 + 540) % 360 - 180;
+    if (result === -180 && angle > 0) return 180; 
+    return result;
+  }, []);
+
+  const interpolateAngleDeg = useCallback((startAngle: number, endAngle: number, t: number): number => {
+      const sa = normalizeAngleDeg(startAngle);
+      const ea = normalizeAngleDeg(endAngle);
+      let diff = ea - sa;
+
+      if (diff > 180) {
+          diff -= 360;
+      } else if (diff < -180) {
+          diff += 360;
+      }
+      return sa + diff * t; 
+  }, [normalizeAngleDeg]);
+
   // Generate optimal spline path with physics constraints
   const generateOptimalPath = useCallback((waypoints: Waypoint[]) => {
     if (waypoints.length < 2) return [];
@@ -288,11 +312,68 @@ const HolonomicPathOptimizer = () => {
     if (waypoints.length >= 2) {
       const newPath = generateOptimalPath(waypoints);
       setOptimizedPath(newPath);
+
+      // Calculate waypointSHeadings
+      if (newPath.length > 0) {
+        const newWPSHeadings: {s: number, heading: number}[] = [];
+        waypoints.forEach(wp => {
+          if (wp.heading !== undefined) {
+            let closestPoint = newPath[0];
+            let minDistSq = Infinity;
+
+            newPath.forEach(p => {
+              const distSq = (p.x - wp.x)**2 + (p.y - wp.y)**2;
+              if (distSq < minDistSq) {
+                minDistSq = distSq;
+                closestPoint = p;
+              }
+            });
+            newWPSHeadings.push({ s: closestPoint.s, heading: wp.heading });
+          }
+        });
+        // Sort by s value. If multiple waypoints map to the exact same 's' (unlikely but possible if waypoints are very close),
+        // their relative order doesn't strictly matter for the current interpolation logic, but sorting helps.
+        newWPSHeadings.sort((a, b) => a.s - b.s);
+        setWaypointSHeadings(newWPSHeadings);
+      } else {
+        setWaypointSHeadings([]);
+      }
     } else {
       setOptimizedPath([]);
       setOptimizationMetrics(null);
+      setWaypointSHeadings([]); // Clear here too
     }
-  }, [waypoints, generateOptimalPath]);
+  }, [waypoints, generateOptimalPath]); // generateOptimalPath depends on config
+
+  // Effect to load default background image on mount
+  useEffect(() => {
+    const defaultBgPath = 'fields/field25.png'; // Path relative to public folder
+    const img = new window.Image();
+    img.onload = () => {
+      setBackgroundImage(img);
+      // Convert image to data URL to store in config for persistence
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        const dataUrl = canvas.toDataURL('image/png');
+        setConfig(prev => ({
+          ...prev,
+          field: { ...prev.field, backgroundImage: dataUrl }
+        }));
+        showMessage('info', 'Default background loaded.');
+      } else {
+        showMessage('error', 'Could not process default background for config.');
+      }
+    };
+    img.onerror = () => {
+      showMessage('error', `Default background ${defaultBgPath} not found. Place it in public/fields/`);
+    };
+    img.src = defaultBgPath;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Run only once on mount
 
   // Draw everything on canvas
   const drawCanvas = useCallback(() => {
@@ -444,15 +525,22 @@ const HolonomicPathOptimizer = () => {
     ctx.stroke();
     
     // Draw robot frame (wheelbase visualization)
+    ctx.save(); // Save current context state
+    ctx.translate(pixelX, pixelY); // Move to robot's center
+    ctx.rotate(angle); // Rotate by robot's angle
+
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
     ctx.lineWidth = 2;
     const wheelbasePixels = metersToPixels(config.physics.wheelbase);
     const trackWidthPixels = metersToPixels(config.physics.trackWidth);
     
     ctx.beginPath();
-    ctx.rect(pixelX - wheelbasePixels/2, pixelY - trackWidthPixels/2, 
+    // Draw rectangle centered at (0,0) in the new rotated context
+    ctx.rect(-wheelbasePixels / 2, -trackWidthPixels / 2, 
              wheelbasePixels, trackWidthPixels);
     ctx.stroke();
+    
+    ctx.restore(); // Restore context to pre-transformation state
     
   }, [config, waypoints, selectedWaypoint, robotState, optimizedPath, backgroundImage, metersToPixels]);
 
@@ -629,12 +717,32 @@ const HolonomicPathOptimizer = () => {
       showMessage('error', 'Path must have at least 2 points to simulate.');
       return;
     }
+    
+    let initialRotation = 0; 
+    if (optimizedPath.length > 0) {
+        const firstPathPointS = optimizedPath[0].s;
+        
+        const firstApplicableTarget = waypointSHeadings.find(wh => wh.s >= firstPathPointS);
+        
+        if (waypoints.length > 0 && waypoints[0].heading !== undefined) {
+            initialRotation = waypoints[0].heading;
+        } else if (firstApplicableTarget) {
+            initialRotation = firstApplicableTarget.heading;
+        } else if (waypointSHeadings.length > 0) {
+            // If all targets are before path starts (edge case) or no targets after start, use last known target
+            initialRotation = waypointSHeadings[waypointSHeadings.length - 1].heading;
+        } else {
+            // No waypoint headings at all, default to 0 for holonomic robot
+            initialRotation = 0; 
+        }
+    }
+
     // Reset robot to the first point before starting simulation
     if (optimizedPath.length > 0) {
       setRobotState({
         x: optimizedPath[0].x,
         y: optimizedPath[0].y,
-        rotation: optimizedPath[0].heading || 0,
+        rotation: initialRotation,
         velocity: optimizedPath[0].velocity,
         angularVelocity: 0
       });
@@ -704,6 +812,54 @@ const HolonomicPathOptimizer = () => {
         return;
       }
 
+      let newRobotRotation = robotState.rotation; // Maintain current orientation by default
+
+      if (waypointSHeadings.length > 0) {
+          const currentS = currentPathPoint.s;
+          
+          let prevTarget: {s: number, heading: number} | null = null;
+          for (let i = waypointSHeadings.length - 1; i >= 0; i--) {
+              if (waypointSHeadings[i].s <= currentS) {
+                  prevTarget = waypointSHeadings[i];
+                  break;
+              }
+          }
+
+          let nextTarget: {s: number, heading: number} | null = null;
+          for (let i = 0; i < waypointSHeadings.length; i++) {
+              // Find first target strictly AFTER currentS, or if multiple targets at currentS,
+              // nextTarget should be one of those if prevTarget isn't already one of them.
+              // For simplicity, let's find the first target strictly after currentS.
+              if (waypointSHeadings[i].s > currentS) {
+                  nextTarget = waypointSHeadings[i];
+                  break;
+              }
+          }
+
+          if (prevTarget && nextTarget) {
+              // If currentS is exactly on a target point that is also prevTarget.s,
+              // and nextTarget.s is different, interpolate.
+              // If prevTarget.s and nextTarget.s are the same (multiple targets at same s, not expected with current generation)
+              // this would lead to division by zero if not handled.
+              // However, nextTarget is defined as > currentS, so nextTarget.s > prevTarget.s (unless currentS is on prevTarget)
+              if (prevTarget.s < nextTarget.s && currentS >= prevTarget.s && currentS <= nextTarget.s) {
+                 const t = (currentS - prevTarget.s) / (nextTarget.s - prevTarget.s);
+                 newRobotRotation = interpolateAngleDeg(prevTarget.heading, nextTarget.heading, Math.max(0, Math.min(1, t)));
+              } else { // Should ideally not happen if logic is correct, fallback to prev or next
+                 newRobotRotation = prevTarget.heading; // Or nextTarget if more appropriate
+              }
+          } else if (prevTarget) {
+              newRobotRotation = prevTarget.heading;
+          } else if (nextTarget) { 
+              // Before the first target point, orient towards it.
+              // If initialRotation in playPath is set correctly, this might only apply if path starts before first target s.
+              newRobotRotation = nextTarget.heading;
+          }
+          // If no targets apply (e.g. currentS outside range of all targets, though prev/next should cover this if list not empty)
+          // newRobotRotation remains robotState.rotation (maintains heading)
+      }
+      // If waypointSHeadings is empty, newRobotRotation remains robotState.rotation (maintains heading).
+
       let nearStopWaypoint = false;
       let actualStopWaypointData: Waypoint | undefined = undefined;
 
@@ -732,8 +888,8 @@ const HolonomicPathOptimizer = () => {
         lastStoppedWaypointIndexRef.current = currentWaypointIndex; // Mark this waypoint as stopped at
 
         setRobotState({
-          x: actualStopWaypointData.x, 
-          y: actualStopWaypointData.y,
+          x: currentPathPoint.x, 
+          y: currentPathPoint.y,
           rotation: actualStopWaypointData.heading !== undefined ? actualStopWaypointData.heading : currentPathPoint.heading || 0,
           velocity: 0, 
           angularVelocity: 0
@@ -746,8 +902,6 @@ const HolonomicPathOptimizer = () => {
 
         setTimeout(() => {
           isPausedForStopPointRef.current = false; 
-          // Advance simulated time by the stop duration to ensure we move past the stop point segment
-          simulatedTimeRef.current += config.waypoint.stopDuration; 
           lastTimestampRef.current = null; // Reset for accurate deltaTime on resume
 
           if (isPlaying) { 
@@ -763,10 +917,10 @@ const HolonomicPathOptimizer = () => {
         lastStoppedWaypointIndexRef.current = null;
       }
 
-      setRobotState({
+      setRobotState({ // Update robot state using the newRobotRotation
         x: currentPathPoint.x,
         y: currentPathPoint.y,
-        rotation: currentPathPoint.heading || 0,
+        rotation: newRobotRotation, 
         velocity: currentPathPoint.velocity,
         angularVelocity: 0
       });
@@ -785,7 +939,7 @@ const HolonomicPathOptimizer = () => {
       }
       lastTimestampRef.current = null; 
     };
-  }, [isPlaying, optimizedPath, waypoints, config.waypoint.stopDuration, simulationSpeedFactor, showMessage]);
+  }, [isPlaying, optimizedPath, waypoints, config.waypoint.stopDuration, simulationSpeedFactor, showMessage, interpolateAngleDeg, robotState.rotation, waypointSHeadings]);
 
   return (
     <div className="w-full h-screen bg-background-primary flex text-text-primary font-sans overflow-hidden">
