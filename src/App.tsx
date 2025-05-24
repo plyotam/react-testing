@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { Download, Upload, Settings, Play, RotateCcw, Trash2, Image, Zap, Target, Square } from 'lucide-react';
 import { CubicSpline } from './utils/CubicSpline';
+import { QuinticSpline } from './utils/QuinticSpline';
 import ConfigInput from './components/ConfigInput';
 import { Waypoint } from './types/Waypoint';
 
@@ -169,8 +170,14 @@ const HolonomicPathOptimizer = () => {
     }
     
     // Create splines for x and y coordinates
-    const xSpline = new CubicSpline(distances, waypoints.map(wp => wp.x));
-    const ySpline = new CubicSpline(distances, waypoints.map(wp => wp.y));
+    let xSpline, ySpline;
+    if (config.path.splineType === 'quintic') {
+      xSpline = new QuinticSpline(distances, waypoints.map(wp => wp.x));
+      ySpline = new QuinticSpline(distances, waypoints.map(wp => wp.y));
+    } else { // Default to cubic
+      xSpline = new CubicSpline(distances, waypoints.map(wp => wp.x));
+      ySpline = new CubicSpline(distances, waypoints.map(wp => wp.y));
+    }
     
     const totalDistance = distances[distances.length - 1];
     metrics.totalDistance = totalDistance;
@@ -1092,6 +1099,17 @@ const HolonomicPathOptimizer = () => {
             {/* Path Config */}
             <div className="space-y-2 pt-3 border-t border-border-color/50">
               <h4 className="font-semibold text-text-secondary mt-2">Path Settings</h4>
+              <div className="flex items-center justify-between py-1">
+                <label className="text-sm text-text-secondary">Spline Type:</label>
+                <select 
+                  value={config.path.splineType}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setConfig(prev => ({ ...prev, path: { ...prev.path, splineType: e.target.value as 'cubic' | 'quintic' } }))}
+                  className="px-3 py-2 border border-border-color/50 rounded-md text-sm bg-background-primary text-text-primary focus:ring-1 focus:ring-accent-primary focus:border-accent-primary outline-none"
+                >
+                  <option value="cubic">Cubic</option>
+                  <option value="quintic">Quintic</option>
+                </select>
+              </div>
               <ConfigInput label="Path Resolution" value={config.path.pathResolution} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig(prev => ({ ...prev, path: { ...prev.path, pathResolution: parseFloat(e.target.value) } }))} unit="m" step={0.01} className="mb-1" />
               <ConfigInput label="Optimization Iterations" value={config.path.optimizationIterations} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setConfig(prev => ({ ...prev, path: { ...prev.path, optimizationIterations: parseInt(e.target.value) } }))} type="number" step="1" min={1} className="mb-1" />
               <div className="flex items-center justify-between py-1">
