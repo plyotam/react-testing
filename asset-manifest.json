@@ -1,0 +1,16 @@
+{
+  "files": {
+    "main.css": "/plyotam/react-testing/static/css/main.417d4d6e.css",
+    "main.js": "/plyotam/react-testing/static/js/main.aad6015f.js",
+    "static/js/453.5c3a1f00.chunk.js": "/plyotam/react-testing/static/js/453.5c3a1f00.chunk.js",
+    "static/media/Night_Machine.otf": "/plyotam/react-testing/static/media/Night_Machine.c296fc7e2961dba38ca3.otf",
+    "index.html": "/plyotam/react-testing/index.html",
+    "main.417d4d6e.css.map": "/plyotam/react-testing/static/css/main.417d4d6e.css.map",
+    "main.aad6015f.js.map": "/plyotam/react-testing/static/js/main.aad6015f.js.map",
+    "453.5c3a1f00.chunk.js.map": "/plyotam/react-testing/static/js/453.5c3a1f00.chunk.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.417d4d6e.css",
+    "static/js/main.aad6015f.js"
+  ]
+}
