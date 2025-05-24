@@ -1,16 +1,16 @@
 {
   "files": {
-    "main.css": "/plyotam/react-testing/static/css/main.417d4d6e.css",
-    "main.js": "/plyotam/react-testing/static/js/main.aad6015f.js",
-    "static/js/453.5c3a1f00.chunk.js": "/plyotam/react-testing/static/js/453.5c3a1f00.chunk.js",
-    "static/media/Night_Machine.otf": "/plyotam/react-testing/static/media/Night_Machine.c296fc7e2961dba38ca3.otf",
-    "index.html": "/plyotam/react-testing/index.html",
-    "main.417d4d6e.css.map": "/plyotam/react-testing/static/css/main.417d4d6e.css.map",
-    "main.aad6015f.js.map": "/plyotam/react-testing/static/js/main.aad6015f.js.map",
-    "453.5c3a1f00.chunk.js.map": "/plyotam/react-testing/static/js/453.5c3a1f00.chunk.js.map"
+    "main.css": "/react-testing/static/css/main.2a613e66.css",
+    "main.js": "/react-testing/static/js/main.49296abe.js",
+    "static/js/453.5c3a1f00.chunk.js": "/react-testing/static/js/453.5c3a1f00.chunk.js",
+    "static/media/Night_Machine.otf": "/react-testing/static/media/Night_Machine.c296fc7e2961dba38ca3.otf",
+    "index.html": "/react-testing/index.html",
+    "main.2a613e66.css.map": "/react-testing/static/css/main.2a613e66.css.map",
+    "main.49296abe.js.map": "/react-testing/static/js/main.49296abe.js.map",
+    "453.5c3a1f00.chunk.js.map": "/react-testing/static/js/453.5c3a1f00.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.417d4d6e.css",
-    "static/js/main.aad6015f.js"
+    "static/css/main.2a613e66.css",
+    "static/js/main.49296abe.js"
   ]
 }
