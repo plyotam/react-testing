@@ -86,6 +86,23 @@ export interface AppUIProps {
   clearPendingEventZoneCreation: () => void;
   pendingCommandMarkerCreation: { s: number, time: number, x: number, y: number } | null;
   clearPendingCommandMarkerCreation: () => void;
+
+  // Event Zone Selection
+  selectedEventZoneId: string | null;
+  setSelectedEventZoneId: (id: string | null) => void;
+
+  // Event Zone Dragging
+  isDraggingEventZone: boolean;
+  setIsDraggingEventZone: (isDragging: boolean) => void;
+  dragOffset: { x: number; y: number } | null;
+  setDragOffset: (offset: { x: number; y: number } | null) => void;
+  // onUpdateEventZone is already a prop
+
+  // Command Marker Selection & Repositioning
+  selectedCommandMarkerId: string | null;
+  setSelectedCommandMarkerId: (id: string | null) => void;
+  isRepositioningCommandMarker: boolean;
+  setIsRepositioningCommandMarker: (isRepositioning: boolean) => void;
 }
 
 const AppUI: React.FC<AppUIProps> = (props) => {
@@ -105,7 +122,14 @@ const AppUI: React.FC<AppUIProps> = (props) => {
     eventZones, setEventZones,
     onAddEventZone, onUpdateEventZone, onDeleteEventZone,
     pendingEventZoneCreation, clearPendingEventZoneCreation,
-    pendingCommandMarkerCreation, clearPendingCommandMarkerCreation
+    pendingCommandMarkerCreation, clearPendingCommandMarkerCreation,
+    selectedEventZoneId, setSelectedEventZoneId, // Destructure selection props
+    // Destructure dragging props
+    isDraggingEventZone, setIsDraggingEventZone, 
+    dragOffset, setDragOffset,
+    // Destructure command marker selection & repositioning props
+    selectedCommandMarkerId, setSelectedCommandMarkerId,
+    isRepositioningCommandMarker, setIsRepositioningCommandMarker
   } = props;
 
   // Effect to update canvas cursor based on editor mode

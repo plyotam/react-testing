@@ -47,6 +47,12 @@ const HolonomicPathOptimizer = () => {
   const [pendingEventZoneCreation, setPendingEventZoneCreation] = useState<{ x: number, y: number } | null>(null);
   const [pendingCommandMarkerCreation, setPendingCommandMarkerCreation] = useState<{ s: number, time: number, x: number, y: number } | null>(null);
   const [canvasMousePosition, setCanvasMousePosition] = useState<Point | null>(null);
+  const [selectedEventZoneId, setSelectedEventZoneId] = useState<string | null>(null);
+  const [isDraggingEventZone, setIsDraggingEventZone] = useState<boolean>(false);
+  const [dragOffset, setDragOffset] = useState<{ x: number; y: number } | null>(null);
+  const [isResizingEventZone, setIsResizingEventZone] = useState<boolean>(false);
+  const [selectedCommandMarkerId, setSelectedCommandMarkerId] = useState<string | null>(null);
+  const [isRepositioningCommandMarker, setIsRepositioningCommandMarker] = useState<boolean>(false);
 
   const [editorPosition, setEditorPosition] = useState({ x: 50, y: 150 });
   const [isDraggingEditor, setIsDraggingEditor] = useState(false);
@@ -212,6 +218,25 @@ const HolonomicPathOptimizer = () => {
     optimizedPath,
     initiatePendingCommandMarker,
     setCanvasMousePosition, // Pass setter to event handlers
+    eventZones, // Pass eventZones for selection logic
+    selectedEventZoneId, // Pass current selected zone ID
+    setSelectedEventZoneId, // Pass setter for selected zone ID
+    isDraggingEventZone, // Pass dragging state for event zones
+    setIsDraggingEventZone, // Pass setter for dragging state
+    dragOffset, // Pass drag offset
+    setDragOffset, // Pass setter for drag offset
+    onUpdateEventZone, // Pass update function
+    isResizingEventZone, // Pass resizing state
+    setIsResizingEventZone, // Pass setter for resizing state
+    metersToPixels, 
+    pixelsToMeters,
+    // Command Marker specific props
+    commandMarkers, // Pass command markers list
+    selectedCommandMarkerId,
+    setSelectedCommandMarkerId,
+    isRepositioningCommandMarker,
+    setIsRepositioningCommandMarker,
+    onUpdateCommandMarker, // Pass update function for command markers
   });
 
   const deleteWaypoint = (index: number) => {
@@ -994,7 +1019,8 @@ const HolonomicPathOptimizer = () => {
       eventZones, 
       commandMarkers,
     editorMode, // Add editorMode as a dependency
-    currentMousePosition: canvasMousePosition, 
+    currentMousePosition: canvasMousePosition,
+    selectedEventZoneId, // Pass selectedEventZoneId
     });
   }, [
     config, 
@@ -1012,6 +1038,7 @@ const HolonomicPathOptimizer = () => {
     commandMarkers,
     editorMode,
     canvasMousePosition,
+    selectedEventZoneId, // Add selectedEventZoneId to dependency array
     canvasRef // Though canvasRef itself doesn't change, its availability might gate the effect
   ]);
 
@@ -1050,6 +1077,21 @@ const HolonomicPathOptimizer = () => {
     onAddEventZone: addEventZone,
     onUpdateEventZone: updateEventZone,
     onDeleteEventZone: deleteEventZone,
+    selectedEventZoneId, // Pass to AppUI
+    setSelectedEventZoneId, // Pass to AppUI
+    // Dragging event zone props for AppUI (though handlers are in App.tsx)
+    isDraggingEventZone,
+    setIsDraggingEventZone,
+    dragOffset,
+    setDragOffset,
+    // Resizing event zone props for AppUI
+    isResizingEventZone,
+    setIsResizingEventZone,
+    // Command Marker props for AppUI (though handlers are in App.tsx)
+    selectedCommandMarkerId,
+    setSelectedCommandMarkerId,
+    isRepositioningCommandMarker,
+    setIsRepositioningCommandMarker,
   };
 
   return <AppUI {...appUIProps} />;

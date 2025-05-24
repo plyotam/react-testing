@@ -19,7 +19,7 @@ const initialZoneData: Omit<EventZone, 'id'> = {
   commandName: 'NewCommand',
   triggerType: 'onEnter',
   onExitCommandName: '',
-  color: '#FFA500',
+  color: '#f59e0b', // Updated to theme orange
 };
 
 const EventZoneEditor: React.FC<EventZoneEditorProps> = ({
@@ -33,6 +33,31 @@ const EventZoneEditor: React.FC<EventZoneEditorProps> = ({
   const [editingZone, setEditingZone] = useState<EventZone | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
   const [newZoneData, setNewZoneData] = useState<Omit<EventZone, 'id'> | EventZone>(initialZoneData);
+
+  useEffect(() => {
+    if (editingZone && editingZone.id) {
+      const latestZoneVersion = eventZones.find(z => z.id === editingZone.id);
+      if (latestZoneVersion) {
+        // Check if data actually differs to prevent potential loops if newZoneData itself was a dependency
+        // that caused this effect to run.
+        // Compare relevant fields.
+        const nd = newZoneData as EventZone; // Type assertion for easier access
+        if (latestZoneVersion.x !== nd.x ||
+            latestZoneVersion.y !== nd.y ||
+            latestZoneVersion.radius !== nd.radius ||
+            latestZoneVersion.commandName !== nd.commandName ||
+            latestZoneVersion.triggerType !== nd.triggerType ||
+            latestZoneVersion.onExitCommandName !== nd.onExitCommandName ||
+            latestZoneVersion.color !== nd.color
+        ) {
+          setNewZoneData(latestZoneVersion);
+        }
+      } else {
+        // The zone being edited was deleted externally
+        setEditingZone(null);
+      }
+    }
+  }, [eventZones, editingZone, newZoneData]); // newZoneData is included for the comparison logic
 
   const handleStartCreate = useCallback(() => {
     setIsCreatingNew(true);
@@ -127,7 +152,7 @@ const EventZoneEditor: React.FC<EventZoneEditorProps> = ({
       )}
       <div>
         <label htmlFor="color" className="text-sm text-text-secondary block">Display Color</label>
-        <input type="color" name="color" value={newZoneData.color || '#FFA500'} onChange={handleInputChange} className="w-full h-8 p-0 border-none rounded-md cursor-pointer" />
+        <input type="color" name="color" value={newZoneData.color || '#f59e0b'} onChange={handleInputChange} className="w-full h-8 p-0 border-none rounded-md cursor-pointer" />
       </div>
       <div className="flex justify-end space-x-2 pt-2">
         <button onClick={handleCancel} className="p-2 rounded-md text-text-secondary hover:bg-background-tertiary flex items-center"><XCircle size={16} className="mr-1"/> Cancel</button>

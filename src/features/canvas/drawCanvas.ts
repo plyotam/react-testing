@@ -21,6 +21,12 @@ interface DrawCanvasArgs {
   commandMarkers: CommandMarker[];
   editorMode: 'waypoints' | 'addEventZoneCenter' | 'addCommandMarker';
   currentMousePosition: Point | null; // x, y in meters
+  selectedEventZoneId: string | null; // For highlighting
+
+  // Command Marker specific args for drawing
+  selectedCommandMarkerId: string | null;
+  isRepositioningCommandMarker: boolean;
+  // optimizedPath and currentMousePosition are already in DrawCanvasArgs
 }
 
 export const drawCanvasContent = ({
@@ -41,6 +47,10 @@ export const drawCanvasContent = ({
   commandMarkers,
   editorMode,
   currentMousePosition,
+  selectedEventZoneId, // Destructure
+  // Destructure command marker specific args
+  selectedCommandMarkerId,
+  isRepositioningCommandMarker,
 }: DrawCanvasArgs) => {
   const canvasWidth = metersToPixels(config.field.width);
   const canvasHeight = metersToPixels(config.field.height);
@@ -210,10 +220,31 @@ export const drawCanvasContent = ({
     const zoneY = metersToPixels(zone.y);
     const zoneRadius = metersToPixels(zone.radius);
     
+    const THEME_ORANGE = config.path.selectedColor; // e.g. #f59e0b
+
     ctx.save();
-    ctx.strokeStyle = zone.color || 'rgba(255, 165, 0, 0.7)'; // Default orange-ish
-    ctx.fillStyle = zone.color ? zone.color.replace(/[^,]+$/, '0.3)') : 'rgba(255, 165, 0, 0.3)'; // Lighter fill
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = zone.color || THEME_ORANGE;
+    
+    let fillStyle;
+    if (zone.color) {
+      if (zone.color.startsWith('#') && zone.color.length === 7) { // #RRGGBB
+        fillStyle = zone.color + '66'; // Append '66' for 0.4 alpha
+      } else if (zone.color.startsWith('rgba')) {
+        fillStyle = zone.color.replace(/[\d\.]+\)$/, '0.4)'); // Replace alpha with 0.4
+      } else if (zone.color.startsWith('rgb')) {
+        fillStyle = zone.color.replace('rgb', 'rgba').replace(')', ', 0.4)'); // Convert rgb to rgba with 0.4 alpha
+      } else {
+        // Fallback for unrecognized zone.color format, use theme orange with 0.4 alpha
+        fillStyle = THEME_ORANGE + '66';
+      }
+    } else {
+      fillStyle = THEME_ORANGE + '66'; // Default to theme orange with 0.4 alpha
+    }
+    ctx.fillStyle = fillStyle;
+    
+    const isSelectedZone = zone.id === selectedEventZoneId;
+    ctx.lineWidth = isSelectedZone ? 4 : 2; // Highlight selected zone with thicker border
+
     ctx.beginPath();
     ctx.arc(zoneX, zoneY, zoneRadius, 0, 2 * Math.PI);
     ctx.fill();
@@ -227,15 +258,35 @@ export const drawCanvasContent = ({
       ctx.textBaseline = 'middle';
       
       // Text outline for better contrast
+      // Note: lineWidth for text outline was 3, if we reuse ctx.lineWidth it might be 2 or 4 from zone border
+      const originalLineWidth = ctx.lineWidth;
       ctx.strokeStyle = '#000000'; // Black outline
-      ctx.lineWidth = 3; // Outline width
+      ctx.lineWidth = 3; // Outline width for text
       ctx.strokeText(zone.commandName, zoneX, zoneY);
       
       // Actual text
       ctx.fillStyle = '#FFFFFF'; // White text
       ctx.fillText(zone.commandName, zoneX, zoneY);
+      ctx.lineWidth = originalLineWidth; // Restore line width
     }
-    ctx.restore();
+
+    // Draw resize handle if selected
+    if (isSelectedZone) {
+      const RESIZE_HANDLE_RADIUS_PIXELS = 8;
+      const handleX = zoneX + zoneRadius; // Handle on the right edge of the circle
+      const handleY = zoneY;
+
+      ctx.save();
+      ctx.fillStyle = config.path.selectedColor; // Theme orange for the handle fill
+      ctx.strokeStyle = '#000000'; // Black border for the handle
+      ctx.lineWidth = 1.5; // Thinner border for the handle
+      ctx.beginPath();
+      ctx.arc(handleX, handleY, RESIZE_HANDLE_RADIUS_PIXELS, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore(); // Restore context saved at the beginning of zone drawing
   });
 
   // Draw Command Markers
@@ -246,9 +297,12 @@ export const drawCanvasContent = ({
         const markerY = metersToPixels(marker.renderY);
         
         ctx.save();
-        // New style for command markers: filled circle with border
-        const markerRadius = 5; // pixels
-        ctx.fillStyle = '#FFFF00'; // Bright Yellow
+        
+        const isSelectedMarker = marker.id === selectedCommandMarkerId;
+        const markerRadius = isSelectedMarker ? 8 : 5; // Larger if selected
+        const markerFillColor = isSelectedMarker ? '#FF8C00' : '#FFFF00'; // Darker orange if selected, else yellow
+        
+        ctx.fillStyle = markerFillColor;
         ctx.strokeStyle = '#000000'; // Black border
         ctx.lineWidth = 1; // Border width
         
@@ -362,9 +416,11 @@ export const drawCanvasContent = ({
       const zoneX = metersToPixels(currentMousePosition.x);
       const zoneY = metersToPixels(currentMousePosition.y);
       
+      const THEME_ORANGE_PREVIEW = config.path.selectedColor;
+
       ctx.save();
-      ctx.strokeStyle = 'rgba(255, 165, 0, 0.5)'; // Semi-transparent orange
-      ctx.fillStyle = 'rgba(255, 165, 0, 0.15)';   // Very transparent orange fill
+      ctx.strokeStyle = THEME_ORANGE_PREVIEW + '80'; // Theme orange with ~0.5 alpha (80 hex)
+      ctx.fillStyle = THEME_ORANGE_PREVIEW + '33';   // Theme orange with ~0.2 alpha (33 hex)
       ctx.lineWidth = 2;
       ctx.setLineDash([5, 5]); // Dashed line for preview
       
@@ -374,7 +430,7 @@ export const drawCanvasContent = ({
       ctx.stroke();
       
       ctx.restore();
-    } else if (editorMode === 'addCommandMarker' && optimizedPath && optimizedPath.length > 0) {
+    } else if (editorMode === 'addCommandMarker' && optimizedPath.length > 0 && currentMousePosition) {
       let closestPathPoint: OptimizedPathPoint | null = null;
       let minDistanceSq = Infinity;
 
@@ -401,6 +457,51 @@ export const drawCanvasContent = ({
         ctx.arc(markerX, markerY, markerRadius, 0, 2 * Math.PI);
         ctx.fill();
         ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+
+  // Draw Command Marker Repositioning Preview
+  if (isRepositioningCommandMarker && selectedCommandMarkerId && currentMousePosition && optimizedPath.length > 0) {
+    const selectedMarker = commandMarkers.find(m => m.id === selectedCommandMarkerId);
+    if (selectedMarker) {
+      // Find closest point on path to currentMousePosition (in meters)
+      let closestPathPoint: OptimizedPathPoint | null = null;
+      let minDistanceSq = Infinity;
+      for (const p of optimizedPath) {
+        const distSq = (p.x - currentMousePosition.x)**2 + (p.y - currentMousePosition.y)**2;
+        if (distSq < minDistanceSq) {
+          minDistanceSq = distSq;
+          closestPathPoint = p;
+        }
+      }
+
+      if (closestPathPoint) {
+        const previewX = metersToPixels(closestPathPoint.x);
+        const previewY = metersToPixels(closestPathPoint.y);
+        
+        ctx.save();
+        ctx.globalAlpha = 0.6; // Semi-transparent
+        ctx.fillStyle = '#FF8C00'; // Preview color (dark orange)
+        ctx.strokeStyle = '#000000';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(previewX, previewY, 6, 0, 2 * Math.PI); // Slightly different size for preview
+        ctx.fill();
+        ctx.stroke();
+        
+        // Draw marker name preview
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.7)'; // Semi-transparent white text
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)'; // Semi-transparent black outline
+        ctx.lineWidth = 2; 
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        const textX = previewX + 6 + 4; // Position text to the right of the preview circle
+        const textY = previewY;
+        ctx.strokeText(selectedMarker.commandName, textX, textY);
+        ctx.fillText(selectedMarker.commandName, textX, textY);
         ctx.restore();
       }
     }

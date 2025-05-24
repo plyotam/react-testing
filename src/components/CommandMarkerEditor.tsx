@@ -41,6 +41,32 @@ const CommandMarkerEditor: React.FC<CommandMarkerEditorProps> = ({
   const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
   const [newMarkerData, setNewMarkerData] = useState<FormState>(initialFormState);
 
+  useEffect(() => {
+    if (editingMarkerId) {
+      const latestMarkerVersion = commandMarkers.find(m => m.id === editingMarkerId);
+      if (latestMarkerVersion) {
+        const currentParamsStr = typeof newMarkerData.commandParams === 'object' 
+                               ? JSON.stringify(newMarkerData.commandParams) 
+                               : String(newMarkerData.commandParams);
+        const latestParamsStr = typeof latestMarkerVersion.commandParams === 'object' 
+                              ? JSON.stringify(latestMarkerVersion.commandParams) 
+                              : String(latestMarkerVersion.commandParams);
+
+        // Check if data actually differs
+        if (latestMarkerVersion.s !== newMarkerData.s ||
+            latestMarkerVersion.time !== newMarkerData.time ||
+            latestMarkerVersion.commandName !== newMarkerData.commandName ||
+            currentParamsStr !== latestParamsStr
+        ) {
+          setNewMarkerData({ ...latestMarkerVersion, commandParams: latestMarkerVersion.commandParams || {} });
+        }
+      } else {
+        // Marker being edited was deleted externally
+        setEditingMarkerId(null);
+      }
+    }
+  }, [commandMarkers, editingMarkerId, newMarkerData]); // newMarkerData for comparison logic
+
   const handleStartCreate = useCallback(() => {
     setIsCreating(true);
     setEditingMarkerId(null);
