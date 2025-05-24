@@ -1,9 +1,20 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Download, Upload, Settings, Play, RotateCcw, Trash2, Image, Zap, Target, Square } from 'lucide-react';
+import { Download, Upload, Settings, Play, RotateCcw, Trash2, Image, Zap, Target, Square, BarChart2 } from 'lucide-react';
 import { CubicSpline } from './utils/CubicSpline';
 import { QuinticSpline } from './utils/QuinticSpline';
 import ConfigInput from './components/ConfigInput';
 import { Waypoint } from './types/Waypoint';
+import SimulationGraphs from './components/SimulationGraphs';
+
+// Add this interface
+interface SimulationDataPoint {
+  time: number;
+  x: number;
+  y: number;
+  velocity: number;
+  acceleration: number;
+  heading: number;
+}
 
 const HolonomicPathOptimizer = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -96,6 +107,8 @@ const HolonomicPathOptimizer = () => {
   const [message, setMessage] = useState<{ type: 'error' | 'info', text: string } | null>(null);
   const [simulationSpeedFactor, setSimulationSpeedFactor] = useState(1); // 1x, 2x, 4x
   const [waypointSHeadings, setWaypointSHeadings] = useState<{s: number, heading: number}[]>([]);
+  const [simulationHistory, setSimulationHistory] = useState<SimulationDataPoint[]>([]);
+  const [showGraphs, setShowGraphs] = useState(false);
 
   // Animation frame ID ref
   const animationFrameIdRef = useRef<number | null>(null);
@@ -724,6 +737,7 @@ const HolonomicPathOptimizer = () => {
       showMessage('error', 'Path must have at least 2 points to simulate.');
       return;
     }
+    setSimulationHistory([]); // Clear previous history
     
     let initialRotation = 0; 
     if (optimizedPath.length > 0) {
@@ -746,18 +760,28 @@ const HolonomicPathOptimizer = () => {
 
     // Reset robot to the first point before starting simulation
     if (optimizedPath.length > 0) {
+      const firstPoint = optimizedPath[0];
+      const initialDataPoint: SimulationDataPoint = {
+        time: 0,
+        x: firstPoint.x,
+        y: firstPoint.y,
+        velocity: firstPoint.velocity, // Use velocity from path itself
+        acceleration: firstPoint.acceleration, // Use acceleration from path itself
+        heading: initialRotation, 
+      };
+      setSimulationHistory([initialDataPoint]);
       setRobotState({
-        x: optimizedPath[0].x,
-        y: optimizedPath[0].y,
+        x: firstPoint.x,
+        y: firstPoint.y,
         rotation: initialRotation,
-        velocity: optimizedPath[0].velocity,
+        velocity: firstPoint.velocity,
         angularVelocity: 0
       });
     }
     currentPathIndexRef.current = 0;
-    simulatedTimeRef.current = 0; // Reset simulated time
-    lastTimestampRef.current = null; // Reset last timestamp for accurate deltaTime
-    setIsPlaying(true); // This will trigger the useEffect for animation
+    simulatedTimeRef.current = 0;
+    lastTimestampRef.current = null;
+    setIsPlaying(true);
   };
 
   // Stop animation
@@ -778,6 +802,7 @@ const HolonomicPathOptimizer = () => {
 
     const simulationStep = (timestamp: number) => {
       if (isPausedForStopPointRef.current) {
+        animationFrameIdRef.current = requestAnimationFrame(simulationStep); // Keep requesting frame even if paused to allow resume
         return;
       }
 
@@ -794,12 +819,21 @@ const HolonomicPathOptimizer = () => {
       let newPathIndex = optimizedPath.findIndex(p => p.time >= simulatedTimeRef.current);
 
       if (newPathIndex === -1 && optimizedPath.length > 0 && simulatedTimeRef.current > optimizedPath[optimizedPath.length - 1].time) {
-        newPathIndex = optimizedPath.length - 1;
+        newPathIndex = optimizedPath.length - 1; // Clamp to the last point
         const lastPoint = optimizedPath[newPathIndex];
+        const finalDataPoint: SimulationDataPoint = {
+          time: lastPoint.time, // Use actual last point time
+          x: lastPoint.x,
+          y: lastPoint.y,
+          velocity: 0, // Assume 0 velocity at the very end
+          acceleration: 0, // Assume 0 acceleration at the very end
+          heading: lastPoint.heading || robotState.rotation, // Use path heading or last robot rotation
+        };
+        setSimulationHistory(prevHistory => addDataPointToHistory(prevHistory, finalDataPoint));
         setRobotState({
           x: lastPoint.x,
           y: lastPoint.y,
-          rotation: lastPoint.heading || 0,
+          rotation: finalDataPoint.heading,
           velocity: 0, 
           angularVelocity: 0
         });
@@ -819,53 +853,46 @@ const HolonomicPathOptimizer = () => {
         return;
       }
 
-      let newRobotRotation = robotState.rotation; // Maintain current orientation by default
-
+      let newRobotRotation = robotState.rotation;
       if (waypointSHeadings.length > 0) {
-          const currentS = currentPathPoint.s;
-          
-          let prevTarget: {s: number, heading: number} | null = null;
-          for (let i = waypointSHeadings.length - 1; i >= 0; i--) {
-              if (waypointSHeadings[i].s <= currentS) {
-                  prevTarget = waypointSHeadings[i];
-                  break;
-              }
-          }
+        const currentS = currentPathPoint.s;
+        let prevTarget: {s: number, heading: number} | null = null;
+        for (let i = waypointSHeadings.length - 1; i >= 0; i--) {
+            if (waypointSHeadings[i].s <= currentS) {
+                prevTarget = waypointSHeadings[i];
+                break;
+            }
+        }
+        let nextTarget: {s: number, heading: number} | null = null;
+        for (let i = 0; i < waypointSHeadings.length; i++) {
+            if (waypointSHeadings[i].s > currentS) {
+                nextTarget = waypointSHeadings[i];
+                break;
+            }
+        }
+        if (prevTarget && nextTarget) {
+            if (prevTarget.s < nextTarget.s && currentS >= prevTarget.s && currentS <= nextTarget.s) {
+               const t = (currentS - prevTarget.s) / (nextTarget.s - prevTarget.s);
+               newRobotRotation = interpolateAngleDeg(prevTarget.heading, nextTarget.heading, Math.max(0, Math.min(1, t)));
+            } else { 
+               newRobotRotation = prevTarget.heading;
+            }
+        } else if (prevTarget) {
+            newRobotRotation = prevTarget.heading;
+        } else if (nextTarget) { 
+            newRobotRotation = nextTarget.heading;
+        }
+    }
 
-          let nextTarget: {s: number, heading: number} | null = null;
-          for (let i = 0; i < waypointSHeadings.length; i++) {
-              // Find first target strictly AFTER currentS, or if multiple targets at currentS,
-              // nextTarget should be one of those if prevTarget isn't already one of them.
-              // For simplicity, let's find the first target strictly after currentS.
-              if (waypointSHeadings[i].s > currentS) {
-                  nextTarget = waypointSHeadings[i];
-                  break;
-              }
-          }
-
-          if (prevTarget && nextTarget) {
-              // If currentS is exactly on a target point that is also prevTarget.s,
-              // and nextTarget.s is different, interpolate.
-              // If prevTarget.s and nextTarget.s are the same (multiple targets at same s, not expected with current generation)
-              // this would lead to division by zero if not handled.
-              // However, nextTarget is defined as > currentS, so nextTarget.s > prevTarget.s (unless currentS is on prevTarget)
-              if (prevTarget.s < nextTarget.s && currentS >= prevTarget.s && currentS <= nextTarget.s) {
-                 const t = (currentS - prevTarget.s) / (nextTarget.s - prevTarget.s);
-                 newRobotRotation = interpolateAngleDeg(prevTarget.heading, nextTarget.heading, Math.max(0, Math.min(1, t)));
-              } else { // Should ideally not happen if logic is correct, fallback to prev or next
-                 newRobotRotation = prevTarget.heading; // Or nextTarget if more appropriate
-              }
-          } else if (prevTarget) {
-              newRobotRotation = prevTarget.heading;
-          } else if (nextTarget) { 
-              // Before the first target point, orient towards it.
-              // If initialRotation in playPath is set correctly, this might only apply if path starts before first target s.
-              newRobotRotation = nextTarget.heading;
-          }
-          // If no targets apply (e.g. currentS outside range of all targets, though prev/next should cover this if list not empty)
-          // newRobotRotation remains robotState.rotation (maintains heading)
-      }
-      // If waypointSHeadings is empty, newRobotRotation remains robotState.rotation (maintains heading).
+      const liveDataPoint: SimulationDataPoint = {
+        time: simulatedTimeRef.current,
+        x: currentPathPoint.x,
+        y: currentPathPoint.y,
+        velocity: currentPathPoint.velocity,
+        acceleration: currentPathPoint.acceleration,
+        heading: newRobotRotation,
+      };
+      setSimulationHistory(prevHistory => addDataPointToHistory(prevHistory, liveDataPoint));
 
       let nearStopWaypoint = false;
       let actualStopWaypointData: Waypoint | undefined = undefined;
@@ -881,50 +908,55 @@ const HolonomicPathOptimizer = () => {
         }
       }
       
-      let currentWaypointIndex = -1; // Get current waypoint actual index
+      let currentWaypointIndex = -1;
       if(actualStopWaypointData) {
         currentWaypointIndex = waypoints.indexOf(actualStopWaypointData);
       }
 
-      // Condition to trigger stop:
       if (nearStopWaypoint && 
           currentPathPoint.velocity < 0.05 && 
           actualStopWaypointData && 
-          lastStoppedWaypointIndexRef.current !== currentWaypointIndex // Only stop if it's a new waypoint stop
+          lastStoppedWaypointIndexRef.current !== currentWaypointIndex
       ) {
-        lastStoppedWaypointIndexRef.current = currentWaypointIndex; // Mark this waypoint as stopped at
+        lastStoppedWaypointIndexRef.current = currentWaypointIndex;
 
+        const stopStateHeading = actualStopWaypointData.heading !== undefined ? actualStopWaypointData.heading : currentPathPoint.heading || 0;
         setRobotState({
           x: currentPathPoint.x, 
           y: currentPathPoint.y,
-          rotation: actualStopWaypointData.heading !== undefined ? actualStopWaypointData.heading : currentPathPoint.heading || 0,
+          rotation: stopStateHeading,
           velocity: 0, 
           angularVelocity: 0
         });
 
+        const stopDataPoint: SimulationDataPoint = {
+          time: simulatedTimeRef.current,
+          x: currentPathPoint.x,
+          y: currentPathPoint.y,
+          velocity: 0,
+          acceleration: 0, 
+          heading: stopStateHeading,
+        };
+        setSimulationHistory(prevHistory => addDataPointToHistory(prevHistory, stopDataPoint));
+        
         const stopWpIndex = waypoints.indexOf(actualStopWaypointData) + 1;
         showMessage('info', `Stopping at Waypoint ${stopWpIndex} for ${config.waypoint.stopDuration.toFixed(1)}s`);
-
         isPausedForStopPointRef.current = true;
-
         setTimeout(() => {
           isPausedForStopPointRef.current = false; 
-          lastTimestampRef.current = null; // Reset for accurate deltaTime on resume
-
+          lastTimestampRef.current = null; 
           if (isPlaying) { 
             animationFrameIdRef.current = requestAnimationFrame(simulationStep);
           }
         }, config.waypoint.stopDuration * 1000);
-
         return; 
       }
 
-      // If not near a stop waypoint, or if it's the same one we just stopped at, reset the last stopped index
       if (!nearStopWaypoint || lastStoppedWaypointIndexRef.current !== currentWaypointIndex) {
         lastStoppedWaypointIndexRef.current = null;
       }
 
-      setRobotState({ // Update robot state using the newRobotRotation
+      setRobotState({ 
         x: currentPathPoint.x,
         y: currentPathPoint.y,
         rotation: newRobotRotation, 
@@ -946,7 +978,20 @@ const HolonomicPathOptimizer = () => {
       }
       lastTimestampRef.current = null; 
     };
-  }, [isPlaying, optimizedPath, waypoints, config.waypoint.stopDuration, simulationSpeedFactor, showMessage, interpolateAngleDeg, robotState.rotation, waypointSHeadings]);
+  }, [isPlaying, optimizedPath, waypoints, config.waypoint.stopDuration, simulationSpeedFactor, showMessage, interpolateAngleDeg, robotState.rotation, waypointSHeadings, config.robot.maxAcceleration]); // Added missing dependencies
+
+  // Helper function to add data points to history without duplicates by time
+  const addDataPointToHistory = (history: SimulationDataPoint[], newDataPoint: SimulationDataPoint): SimulationDataPoint[] => {
+    if (history.length === 0 || history[history.length - 1].time < newDataPoint.time) {
+      return [...history, newDataPoint];
+    } else if (history[history.length - 1].time === newDataPoint.time) {
+      // Optional: Update the last point if time is the same, or just keep the old one
+      // For simplicity, we'll keep the old one if time hasn't advanced.
+      // If updates are needed: return [...history.slice(0, -1), newDataPoint];
+      return history; 
+    }
+    return history; // Should not be reached if time is decreasing, but as a fallback
+  };
 
   return (
     <div className="w-full h-screen bg-background-primary flex text-text-primary font-sans overflow-hidden">
@@ -974,6 +1019,13 @@ const HolonomicPathOptimizer = () => {
             </div>
             
             <div className="flex gap-2">
+              <button
+                onClick={() => setShowGraphs(true)}
+                title="Show Simulation Graphs"
+                className="p-2 bg-background-tertiary text-text-secondary rounded-lg hover:bg-accent-primary hover:text-white transform hover:scale-105 shadow-md"
+              >
+                <BarChart2 size={20} />
+              </button>
               <button
                 onClick={() => imageInputRef.current?.click()}
                 title="Load Background Image"
@@ -1228,6 +1280,9 @@ const HolonomicPathOptimizer = () => {
           {message.text}
         </div>
       )}
+
+      {/* Simulation Graphs Pop-out */}
+      {showGraphs && <SimulationGraphs history={simulationHistory} onClose={() => setShowGraphs(false)} />}
     </div> 
   );
 };
