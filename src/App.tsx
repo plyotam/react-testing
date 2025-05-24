@@ -225,18 +225,18 @@ const HolonomicPathOptimizer = () => {
     setIsDraggingEventZone, // Pass setter for dragging state
     dragOffset, // Pass drag offset
     setDragOffset, // Pass setter for drag offset
-    onUpdateEventZone, // Pass update function
+    updateEventZone, // Corrected: Pass update function
     isResizingEventZone, // Pass resizing state
     setIsResizingEventZone, // Pass setter for resizing state
     metersToPixels, 
-    pixelsToMeters,
+    // pixelsToMeters, // Duplicate removed, one instance is already passed near the top
     // Command Marker specific props
     commandMarkers, // Pass command markers list
     selectedCommandMarkerId,
     setSelectedCommandMarkerId,
     isRepositioningCommandMarker,
     setIsRepositioningCommandMarker,
-    onUpdateCommandMarker, // Pass update function for command markers
+    updateCommandMarker, // Corrected: Pass update function for command markers
   });
 
   const deleteWaypoint = (index: number) => {
@@ -1021,6 +1021,8 @@ const HolonomicPathOptimizer = () => {
     editorMode, // Add editorMode as a dependency
     currentMousePosition: canvasMousePosition,
     selectedEventZoneId, // Pass selectedEventZoneId
+    selectedCommandMarkerId, // Added
+    isRepositioningCommandMarker, // Added
     });
   }, [
     config, 
@@ -1039,6 +1041,8 @@ const HolonomicPathOptimizer = () => {
     editorMode,
     canvasMousePosition,
     selectedEventZoneId, // Add selectedEventZoneId to dependency array
+    selectedCommandMarkerId, // Added to dependency array
+    isRepositioningCommandMarker, // Added to dependency array
     canvasRef // Though canvasRef itself doesn't change, its availability might gate the effect
   ]);
 

@@ -98,6 +98,10 @@ export interface AppUIProps {
   setDragOffset: (offset: { x: number; y: number } | null) => void;
   // onUpdateEventZone is already a prop
 
+  // Event Zone Resizing
+  isResizingEventZone: boolean;
+  setIsResizingEventZone: React.Dispatch<React.SetStateAction<boolean>>;
+
   // Command Marker Selection & Repositioning
   selectedCommandMarkerId: string | null;
   setSelectedCommandMarkerId: (id: string | null) => void;
@@ -125,8 +129,10 @@ const AppUI: React.FC<AppUIProps> = (props) => {
     pendingCommandMarkerCreation, clearPendingCommandMarkerCreation,
     selectedEventZoneId, setSelectedEventZoneId, // Destructure selection props
     // Destructure dragging props
-    isDraggingEventZone, setIsDraggingEventZone, 
+    isDraggingEventZone, setIsDraggingEventZone, // Note: isDraggingEventZone and setIsDraggingEventZone are listed twice due to the interface duplication, this will be fine after the interface is fixed.
     dragOffset, setDragOffset,
+    // Destructure resizing props
+    isResizingEventZone, setIsResizingEventZone,
     // Destructure command marker selection & repositioning props
     selectedCommandMarkerId, setSelectedCommandMarkerId,
     isRepositioningCommandMarker, setIsRepositioningCommandMarker

@@ -1,10 +1,11 @@
 import React from 'react';
-import { Waypoint, Point, OptimizedPathPoint } from '../../types';
+import { Waypoint, Point, OptimizedPathPoint, EventZone, CommandMarker } from '../../types'; // Updated import
 import { Config } from '../../config/appConfig';
 
 export interface CanvasEventHandlersArgs {
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   pixelsToMeters: (pixels: number) => number;
+  metersToPixels: (meters: number) => number; // Added metersToPixels
   isMeasuring: boolean;
   measurePoints: Point[];
   setMeasurePoints: React.Dispatch<React.SetStateAction<Point[]>>;
@@ -44,7 +45,7 @@ export interface CanvasEventHandlersArgs {
   setIsDraggingEventZone: React.Dispatch<React.SetStateAction<boolean>>;
   dragOffset: { x: number; y: number } | null;
   setDragOffset: React.Dispatch<React.SetStateAction<{ x: number; y: number } | null>>;
-  onUpdateEventZone: (zone: EventZone) => void;
+  updateEventZone: (zone: EventZone) => void; // Renamed from onUpdateEventZone
 
   // Event Zone resizing
   isResizingEventZone: boolean;
@@ -56,7 +57,7 @@ export interface CanvasEventHandlersArgs {
   setSelectedCommandMarkerId: React.Dispatch<React.SetStateAction<string | null>>;
   isRepositioningCommandMarker: boolean;
   setIsRepositioningCommandMarker: React.Dispatch<React.SetStateAction<boolean>>;
-  onUpdateCommandMarker: (marker: CommandMarker) => void;
+  updateCommandMarker: (marker: CommandMarker) => void; // Renamed from onUpdateCommandMarker
   // pixelsToMeters and optimizedPath are already in args
 }
 
@@ -76,18 +77,20 @@ export const createCanvasEventHandlers = (args: CanvasEventHandlersArgs) => {
     eventZones, selectedEventZoneId, setSelectedEventZoneId, // Destructure selection args
     // Destructure dragging args
     isDraggingEventZone, setIsDraggingEventZone,
-    dragOffset, setDragOffset, onUpdateEventZone,
+    dragOffset, setDragOffset, 
+    updateEventZone, // Corrected name
     // Destructure resizing args
     isResizingEventZone, setIsResizingEventZone,
     // Destructure command marker args
     commandMarkers, selectedCommandMarkerId, setSelectedCommandMarkerId,
-    isRepositioningCommandMarker, setIsRepositioningCommandMarker, onUpdateCommandMarker
+    isRepositioningCommandMarker, setIsRepositioningCommandMarker, 
+    updateCommandMarker // Corrected name
   } = args;
 
   const RESIZE_HANDLE_RADIUS_PIXELS = 8;
   const MIN_EVENT_ZONE_RADIUS_METERS = 0.2;
-  const COMMAND_MARKER_CLICK_RADIUS_METERS = 0.1; // Define constant
-  const metersToPixels = args.metersToPixels; 
+  const COMMAND_MARKER_CLICK_RADIUS_METERS = 0.1; 
+  const metersToPixels = args.metersToPixels; // Already accessed like this, ensure it's in interface
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -114,7 +117,7 @@ export const createCanvasEventHandlers = (args: CanvasEventHandlersArgs) => {
       if (closestPathPoint) {
         const currentMarker = commandMarkers.find(m => m.id === selectedCommandMarkerId);
         if (currentMarker) {
-          onUpdateCommandMarker({ 
+          updateCommandMarker({ // Corrected function name
             ...currentMarker, 
             s: closestPathPoint.s, 
             time: closestPathPoint.time, 
@@ -309,14 +312,14 @@ export const createCanvasEventHandlers = (args: CanvasEventHandlersArgs) => {
       if (selectedZone) {
         const newX = meterX - dragOffset.x;
         const newY = meterY - dragOffset.y;
-        onUpdateEventZone({ ...selectedZone, x: newX, y: newY });
+        updateEventZone({ ...selectedZone, x: newX, y: newY }); // Corrected function name
       }
     } else if (isResizingEventZone && selectedEventZoneId) {
       const selectedZone = eventZones.find(z => z.id === selectedEventZoneId);
       if (selectedZone) {
         let newRadius = Math.sqrt((meterX - selectedZone.x)**2 + (meterY - selectedZone.y)**2);
         newRadius = Math.max(newRadius, MIN_EVENT_ZONE_RADIUS_METERS);
-        onUpdateEventZone({ ...selectedZone, radius: newRadius });
+        updateEventZone({ ...selectedZone, radius: newRadius }); // Corrected function name
       }
     }
     // Update mouse position for visual cues
