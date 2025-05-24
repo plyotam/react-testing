@@ -235,6 +235,11 @@ const CommandMarkerEditor: React.FC<CommandMarkerEditorProps> = ({
                 className={`mt-1 block w-full px-2 py-1.5 border rounded-md shadow-sm focus:ring-accent-info focus:border-accent-info sm:text-sm bg-input-background text-text-primary placeholder-text-tertiary font-mono text-xs ${commandParamsIsString ? 'border-warning-color' : 'border-border-color-secondary'}`}
                 placeholder='{\"power\": 0.5}'
               />
+              {commandParamsIsString && (
+                <p className="mt-1 text-xs text-warning-color">
+                  The entered parameters are not valid JSON. Please correct it.
+                </p>
+              )}
             </div>
           </div>
           <div className="mt-3 flex justify-end space-x-2">

@@ -96,21 +96,21 @@ const EventZoneEditor: React.FC<EventZoneEditorProps> = ({
       </h4>
       <div>
         <label htmlFor="commandName" className="text-sm text-text-secondary block">Command Name</label>
-        <input type="text" name="commandName" value={newZoneData.commandName} onChange={handleInputChange} className="w-full p-1.5 bg-background-secondary border border-border-color rounded-md text-text-primary text-sm" />
+        <input type="text" name="commandName" value={newZoneData.commandName} onChange={handleInputChange} className="w-full p-1.5 bg-background-secondary border border-border-color rounded-md text-text-primary text-sm" placeholder="e.g., IntakeCargo" />
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label htmlFor="x" className="text-sm text-text-secondary block">X (m)</label>
-          <input type="number" name="x" step="0.1" value={newZoneData.x} onChange={handleInputChange} className="w-full p-1.5 bg-background-secondary border border-border-color rounded-md text-text-primary text-sm" />
+          <input type="number" name="x" step="0.1" value={newZoneData.x} onChange={handleInputChange} className="w-full p-1.5 bg-background-secondary border border-border-color rounded-md text-text-primary text-sm" placeholder="Center X coordinate" />
         </div>
         <div>
           <label htmlFor="y" className="text-sm text-text-secondary block">Y (m)</label>
-          <input type="number" name="y" step="0.1" value={newZoneData.y} onChange={handleInputChange} className="w-full p-1.5 bg-background-secondary border border-border-color rounded-md text-text-primary text-sm" />
+          <input type="number" name="y" step="0.1" value={newZoneData.y} onChange={handleInputChange} className="w-full p-1.5 bg-background-secondary border border-border-color rounded-md text-text-primary text-sm" placeholder="Center Y coordinate" />
         </div>
       </div>
       <div>
         <label htmlFor="radius" className="text-sm text-text-secondary block">Radius (m)</label>
-        <input type="number" name="radius" min="0.1" step="0.1" value={newZoneData.radius} onChange={handleInputChange} className="w-full p-1.5 bg-background-secondary border border-border-color rounded-md text-text-primary text-sm" />
+        <input type="number" name="radius" min="0.1" step="0.1" value={newZoneData.radius} onChange={handleInputChange} className="w-full p-1.5 bg-background-secondary border border-border-color rounded-md text-text-primary text-sm" placeholder="Zone radius in meters" />
       </div>
       <div>
         <label htmlFor="triggerType" className="text-sm text-text-secondary block">Trigger Type</label>
@@ -122,7 +122,7 @@ const EventZoneEditor: React.FC<EventZoneEditorProps> = ({
       {newZoneData.triggerType === 'whileInZone' && (
         <div>
           <label htmlFor="onExitCommandName" className="text-sm text-text-secondary block">On Exit Command Name (Optional)</label>
-          <input type="text" name="onExitCommandName" value={newZoneData.onExitCommandName || ''} onChange={handleInputChange} className="w-full p-1.5 bg-background-secondary border border-border-color rounded-md text-text-primary text-sm" />
+          <input type="text" name="onExitCommandName" value={newZoneData.onExitCommandName || ''} onChange={handleInputChange} className="w-full p-1.5 bg-background-secondary border border-border-color rounded-md text-text-primary text-sm" placeholder="e.g., StopIntake" />
         </div>
       )}
       <div>

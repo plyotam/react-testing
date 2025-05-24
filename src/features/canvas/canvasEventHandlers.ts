@@ -32,6 +32,7 @@ export interface CanvasEventHandlersArgs {
   showMessage?: (type: 'error' | 'info' | 'warn', text: string) => void;
   optimizedPath: OptimizedPathPoint[];
   initiatePendingCommandMarker?: (s: number, time: number, x: number, y: number) => void;
+  setCanvasMousePosition: React.Dispatch<React.SetStateAction<Point | null>>;
 }
 
 export const createCanvasEventHandlers = (args: CanvasEventHandlersArgs) => {
@@ -45,7 +46,8 @@ export const createCanvasEventHandlers = (args: CanvasEventHandlersArgs) => {
     mouseDownPosition, setMouseDownPosition, selectedWaypoint, waypointCreationMode, 
     config, setWaypoints, 
     editorMode, initiatePendingEventZone, showMessage,
-    optimizedPath, initiatePendingCommandMarker
+    optimizedPath, initiatePendingCommandMarker,
+    setCanvasMousePosition
   } = args;
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -146,6 +148,8 @@ export const createCanvasEventHandlers = (args: CanvasEventHandlersArgs) => {
     if (isDragging && draggingWaypointIndex !== null) {
       updateWaypointCoordinates(draggingWaypointIndex, meterX, meterY);
     }
+    // Update mouse position for visual cues
+    setCanvasMousePosition({ x: meterX, y: meterY });
   };
 
   const handleCanvasMouseUp = (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -198,6 +202,8 @@ export const createCanvasEventHandlers = (args: CanvasEventHandlersArgs) => {
       setDraggingWaypointIndex(null);
       setMouseDownPosition(null); 
     }
+    // Clear mouse position when mouse leaves canvas
+    setCanvasMousePosition(null);
   };
 
   return {

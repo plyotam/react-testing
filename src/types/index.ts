@@ -52,6 +52,8 @@ export interface CommandMarker {
   time: number; // Corresponding time on the path
   commandName: string; // User-defined name for the command (e.g., "OPEN_CLAW")
   commandParams?: any; // Optional parameters for the command (UNCOMMENTED)
+  renderX?: number;
+  renderY?: number;
 }
 
 export interface EventZone {
@@ -66,4 +68,16 @@ export interface EventZone {
   // For 'onEnter' logic during simulation/robot execution
   // This state might be managed transiently rather than stored directly in the base object
   // hasBeenTriggeredThisSession?: boolean;
+}
+
+// Argument type for the main canvas drawing function
+export interface DrawCanvasArgsBase { // Renaming existing to avoid direct conflict if imported elsewhere, though not strictly necessary
+  // ... existing fields from drawCanvas.ts will be here
+  // For now, let's assume we'll add the new fields to the existing DrawCanvasArgs in drawCanvas.ts directly
+  // or that the type for drawCanvasContent's props object will be updated there.
+  // The prompt implies DrawCanvasArgs is in drawCanvas.ts, but often types are central.
+  // For this step, I'll assume DrawCanvasArgs is defined in drawCanvas.ts and will be updated there.
+  // However, if it were defined in types/index.ts, this is where it would go:
+  editorMode?: 'waypoints' | 'addEventZoneCenter' | 'addCommandMarker'; // Optional for now, will be made mandatory in drawCanvas.ts
+  currentMousePosition?: Point | null; // Point is already defined as {x: number, y: number}
 }
