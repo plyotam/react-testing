@@ -2,6 +2,8 @@
 import { Waypoint, Point, RobotState, OptimizedPathPoint, EventZone, CommandMarker } from '../../types';
 import { Config } from '../../config/appConfig';
 
+import { Point } from '../../types'; // Ensure Point is imported
+
 interface DrawCanvasArgs {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
@@ -18,6 +20,8 @@ interface DrawCanvasArgs {
   measurePreviewPoint: Point | null;
   eventZones: EventZone[];
   commandMarkers: CommandMarker[];
+  editorMode: 'waypoints' | 'addEventZoneCenter' | 'addCommandMarker';
+  currentMousePosition: Point | null; // x, y in meters
 }
 
 export const drawCanvasContent = ({
@@ -36,6 +40,8 @@ export const drawCanvasContent = ({
   measurePreviewPoint,
   eventZones,
   commandMarkers,
+  editorMode,
+  currentMousePosition,
 }: DrawCanvasArgs) => {
   const canvasWidth = metersToPixels(config.field.width);
   const canvasHeight = metersToPixels(config.field.height);
@@ -214,66 +220,57 @@ export const drawCanvasContent = ({
     ctx.fill();
     ctx.stroke();
     
-    // Optional: Draw command name or ID
-    ctx.fillStyle = zone.color || 'rgba(255, 165, 0, 1)';
-    ctx.font = 'bold 10px sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(zone.commandName, zoneX, zoneY);
+    // Draw command name with improved legibility
+    const minPixelRadiusForText = 20; // Only draw text if zone radius is at least 20 pixels
+    if (zoneRadius >= minPixelRadiusForText) {
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      
+      // Text outline for better contrast
+      ctx.strokeStyle = '#000000'; // Black outline
+      ctx.lineWidth = 3; // Outline width
+      ctx.strokeText(zone.commandName, zoneX, zoneY);
+      
+      // Actual text
+      ctx.fillStyle = '#FFFFFF'; // White text
+      ctx.fillText(zone.commandName, zoneX, zoneY);
+    }
     ctx.restore();
   });
 
   // Draw Command Markers
-  if (optimizedPath.length > 0 && commandMarkers.length > 0) {
+  if (commandMarkers.length > 0) {
     commandMarkers.forEach(marker => {
-      // Find the closest point on the optimizedPath for this marker's 's' value
-      let closestPathPoint: OptimizedPathPoint | null = null;
-      let minSDiff = Infinity;
-
-      for (const p of optimizedPath) {
-        const sDiff = Math.abs(p.s - marker.s);
-        if (sDiff < minSDiff) {
-          minSDiff = sDiff;
-          closestPathPoint = p;
-        }
-        // Optimization: if path.s exceeds marker.s significantly, can break early if path is dense enough
-        // For simplicity, we iterate through all points or until path.s is much larger.
-        if (p.s > marker.s + config.path.pathResolution * 5 && sDiff > minSDiff) { // Heuristic break
-            // break; // Disabling break for now to ensure we find the true closest for sparse paths
-        }
-      }
-
-      if (closestPathPoint) {
-        const markerX = metersToPixels(closestPathPoint.x);
-        const markerY = metersToPixels(closestPathPoint.y);
+      if (marker.renderX !== undefined && marker.renderY !== undefined) {
+        const markerX = metersToPixels(marker.renderX);
+        const markerY = metersToPixels(marker.renderY);
         
         ctx.save();
-        // Style for command markers (e.g., a small diamond or specific icon)
-        ctx.fillStyle = '#FFD700'; // Gold color
-        ctx.strokeStyle = '#DAA520'; // Darker gold for border
-        ctx.lineWidth = 1.5;
+        // New style for command markers: filled circle with border
+        const markerRadius = 5; // pixels
+        ctx.fillStyle = '#FFFF00'; // Bright Yellow
+        ctx.strokeStyle = '#000000'; // Black border
+        ctx.lineWidth = 1; // Border width
         
-        // Draw a small diamond shape
-        const size = 6; // pixels
         ctx.beginPath();
-        ctx.moveTo(markerX, markerY - size);
-        ctx.lineTo(markerX + size, markerY);
-        ctx.lineTo(markerX, markerY + size);
-        ctx.lineTo(markerX - size, markerY);
-        ctx.closePath();
+        ctx.arc(markerX, markerY, markerRadius, 0, 2 * Math.PI);
         ctx.fill();
         ctx.stroke();
         
-        // Optional: Draw command name text next to it
-        ctx.fillStyle = '#ffffff';
-        ctx.font = '9px sans-serif';
+        // Draw command name text next to it
+        ctx.fillStyle = '#FFFFFF'; // White text
+        ctx.strokeStyle = '#000000'; // Black outline for text
+        ctx.lineWidth = 2; // Text outline width
+        ctx.font = 'bold 9px sans-serif'; // Slightly bolder font
         ctx.textAlign = 'left';
         ctx.textBaseline = 'middle';
-        // Simple shadow for text
-        ctx.shadowColor = 'black';
-        ctx.shadowBlur = 2;
-        ctx.fillText(marker.commandName, markerX + size + 3, markerY);
-        ctx.shadowBlur = 0; // Reset shadow
+        
+        const textX = markerX + markerRadius + 4; // Position text to the right of the circle
+        const textY = markerY;
+
+        ctx.strokeText(marker.commandName, textX, textY);
+        ctx.fillText(marker.commandName, textX, textY);
 
         ctx.restore();
       }
@@ -358,4 +355,55 @@ export const drawCanvasContent = ({
       drawDistanceText(`${measuredDistance.toFixed(2)} m`, midXDist, midYDist);
     }
   }
-}; 
+
+  // Draw visual cues for editor modes
+  if (currentMousePosition) {
+    if (editorMode === 'addEventZoneCenter') {
+      const radiusInPixels = metersToPixels(config.waypoint.defaultRadius); // Using waypoint defaultRadius as a proxy for event zone default, adjust if specific config exists
+      const zoneX = metersToPixels(currentMousePosition.x);
+      const zoneY = metersToPixels(currentMousePosition.y);
+      
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 165, 0, 0.5)'; // Semi-transparent orange
+      ctx.fillStyle = 'rgba(255, 165, 0, 0.15)';   // Very transparent orange fill
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 5]); // Dashed line for preview
+      
+      ctx.beginPath();
+      ctx.arc(zoneX, zoneY, radiusInPixels, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.stroke();
+      
+      ctx.restore();
+    } else if (editorMode === 'addCommandMarker' && optimizedPath && optimizedPath.length > 0) {
+      let closestPathPoint: OptimizedPathPoint | null = null;
+      let minDistanceSq = Infinity;
+
+      // Find closest point on path to mouse (in meters)
+      for (const p of optimizedPath) {
+        const distSq = (p.x - currentMousePosition.x) ** 2 + (p.y - currentMousePosition.y) ** 2;
+        if (distSq < minDistanceSq) {
+          minDistanceSq = distSq;
+          closestPathPoint = p;
+        }
+      }
+
+      if (closestPathPoint) {
+        const markerX = metersToPixels(closestPathPoint.x);
+        const markerY = metersToPixels(closestPathPoint.y);
+        
+        ctx.save();
+        const markerRadius = 5; 
+        ctx.fillStyle = 'rgba(255, 255, 0, 0.5)'; // Semi-transparent Yellow
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.7)';   // Semi-transparent Black border
+        ctx.lineWidth = 1; 
+        
+        ctx.beginPath();
+        ctx.arc(markerX, markerY, markerRadius, 0, 2 * Math.PI);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+  }
+};

@@ -46,6 +46,7 @@ const HolonomicPathOptimizer = () => {
   const [editorMode, setEditorMode] = useState<'waypoints' | 'addEventZoneCenter' | 'addCommandMarker'>('waypoints');
   const [pendingEventZoneCreation, setPendingEventZoneCreation] = useState<{ x: number, y: number } | null>(null);
   const [pendingCommandMarkerCreation, setPendingCommandMarkerCreation] = useState<{ s: number, time: number, x: number, y: number } | null>(null);
+  const [canvasMousePosition, setCanvasMousePosition] = useState<Point | null>(null);
 
   const [editorPosition, setEditorPosition] = useState({ x: 50, y: 150 });
   const [isDraggingEditor, setIsDraggingEditor] = useState(false);
@@ -210,6 +211,7 @@ const HolonomicPathOptimizer = () => {
     showMessage,
     optimizedPath,
     initiatePendingCommandMarker,
+    setCanvasMousePosition, // Pass setter to event handlers
   });
 
   const deleteWaypoint = (index: number) => {
@@ -924,6 +926,44 @@ const HolonomicPathOptimizer = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showMessage]); // Keep minimal dependencies, setConfig is stable if not included
 
+  // useEffect to pre-calculate renderX and renderY for commandMarkers
+  useEffect(() => {
+    if (optimizedPath && optimizedPath.length > 0 && commandMarkers.length > 0) {
+      let didUpdate = false;
+      const updatedCommandMarkers = commandMarkers.map(marker => {
+        if (!optimizedPath || optimizedPath.length === 0) return marker;
+
+        let closestPathPoint: OptimizedPathPoint | null = null;
+        let minDiff = Infinity;
+
+        for (const point of optimizedPath) {
+          const diff = Math.abs(point.s - marker.s);
+          if (diff < minDiff) {
+            minDiff = diff;
+            closestPathPoint = point;
+          }
+          // Optimization: if diff starts increasing, we've passed the closest point for sorted 's' values
+          // This assumes optimizedPath points are somewhat ordered by 's', which they should be.
+          // However, to be safe, we might need to iterate through all if 's' is not strictly monotonic.
+          // For now, let's assume it's good enough for finding a close point.
+          // A more robust approach would be a binary search if 's' is strictly monotonic and sorted.
+        }
+
+        if (closestPathPoint) {
+          if (marker.renderX !== closestPathPoint.x || marker.renderY !== closestPathPoint.y) {
+            didUpdate = true;
+            return { ...marker, renderX: closestPathPoint.x, renderY: closestPathPoint.y };
+          }
+        }
+        return marker;
+      });
+
+      if (didUpdate) {
+        setCommandMarkers(updatedCommandMarkers);
+      }
+    }
+  }, [optimizedPath, commandMarkers]);
+
   // useEffect for drawing canvas content
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -953,6 +993,8 @@ const HolonomicPathOptimizer = () => {
       measurePreviewPoint,
       eventZones, 
       commandMarkers,
+    editorMode, // Add editorMode as a dependency
+    canvasMousePosition, // Add canvasMousePosition as a dependency
     });
   }, [
     config, 
@@ -968,6 +1010,8 @@ const HolonomicPathOptimizer = () => {
     measurePreviewPoint,
     eventZones, 
     commandMarkers,
+    editorMode,
+    canvasMousePosition,
     canvasRef // Though canvasRef itself doesn't change, its availability might gate the effect
   ]);
 
