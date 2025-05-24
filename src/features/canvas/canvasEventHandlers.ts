@@ -3,7 +3,7 @@ import { Waypoint, Point } from '../../types';
 import { Config } from '../../config/appConfig';
 
 export interface CanvasEventHandlersArgs {
-  canvasRef: React.RefObject<HTMLCanvasElement>;
+  canvasRef: React.RefObject<HTMLCanvasElement | null>;
   pixelsToMeters: (pixels: number) => number;
   isMeasuring: boolean;
   setMeasurePoints: React.Dispatch<React.SetStateAction<Point[]>>;

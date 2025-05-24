@@ -20,13 +20,13 @@ export const defaultConfig = {
   },
   waypoint: {
     defaultRadius: 0.3, // meters
-    defaultTargetVelocity: 1.5, // m/s
+    defaultTargetVelocity: 2, // m/s
     defaultMaxVelocityConstraint: 2.0, // m/s
     minRadius: 0.1,
     maxRadius: 2.0,
     defaultHeading: 0, // degrees
     stopAtWaypoint: false,
-    defaultStopDuration: 1.0, // seconds, NEW default for per-waypoint stop, if stopAtWaypoint is true
+    defaultStopDuration: 0.1, // seconds, NEW default for per-waypoint stop, if stopAtWaypoint is true
   },
   path: {
     splineType: 'cubic', // 'cubic', 'quintic'
