@@ -9,6 +9,8 @@ interface EventZoneEditorProps {
   onDeleteEventZone: (zoneId: string) => void;
   pendingEventZoneCreation: { x: number, y: number } | null;
   clearPendingEventZoneCreation: () => void;
+  selectedZoneId: string | null;
+  setSelectedZoneId: (zoneId: string | null) => void; // To select zone on edit
 }
 
 // Define initialZoneData outside the component
@@ -29,6 +31,8 @@ const EventZoneEditor: React.FC<EventZoneEditorProps> = ({
   onDeleteEventZone,
   pendingEventZoneCreation,
   clearPendingEventZoneCreation,
+  selectedZoneId,
+  setSelectedZoneId,
 }) => {
   const [editingZone, setEditingZone] = useState<EventZone | null>(null);
   const [isCreatingNew, setIsCreatingNew] = useState(false);
@@ -39,6 +43,34 @@ const EventZoneEditor: React.FC<EventZoneEditorProps> = ({
     setEditingZone(null);
     setNewZoneData(initialZoneData);
   }, []); // initialZoneData is stable
+
+  // Effect to sync form with external changes if a zone is being edited
+  useEffect(() => {
+    if (editingZone && editingZone.id === selectedZoneId) {
+      const currentZoneInApp = eventZones.find(z => z.id === editingZone.id);
+      if (currentZoneInApp) {
+        // Check if geometric properties differ to avoid overwriting user input unnecessarily
+        // or causing render loops if other parts of newZoneData are also in dependency arrays elsewhere.
+        if (
+          newZoneData.x !== currentZoneInApp.x ||
+          newZoneData.y !== currentZoneInApp.y ||
+          newZoneData.radius !== currentZoneInApp.radius
+        ) {
+          setNewZoneData(prevData => ({
+            ...prevData, // Preserve other form fields like commandName, color, etc.
+            x: currentZoneInApp.x,
+            y: currentZoneInApp.y,
+            radius: currentZoneInApp.radius,
+          }));
+        }
+      } else {
+        // Zone being edited was deleted or deselected from outside
+        // handleCancel(); // This might be too aggressive if merely deselected.
+                       // If it's deleted, App.tsx should clear selectedZoneId.
+                       // If selectedZoneId is cleared, other logic should handle closing.
+      }
+    }
+  }, [eventZones, selectedZoneId, editingZone, newZoneData.x, newZoneData.y, newZoneData.radius]); // Rerun if relevant parts of newZoneData change too
 
   useEffect(() => {
     if (pendingEventZoneCreation) {
@@ -54,9 +86,26 @@ const EventZoneEditor: React.FC<EventZoneEditorProps> = ({
 
   const handleEdit = (zone: EventZone) => {
     setEditingZone(zone);
+    setSelectedZoneId(zone.id); // Also select the zone when editing starts
     setIsCreatingNew(false);
     setNewZoneData(zone); // Populate form with existing data
   };
+
+  // Effect to open editor if a zone is selected on canvas and not already being edited
+  useEffect(() => {
+    if (selectedZoneId && editingZone?.id !== selectedZoneId && !isCreatingNew) {
+      const zoneToEdit = eventZones.find(z => z.id === selectedZoneId);
+      if (zoneToEdit) {
+        handleEdit(zoneToEdit);
+      } else {
+         // Selected zone not found (e.g. deleted from another source), so clear editing state
+        handleCancel();
+      }
+    } else if (!selectedZoneId && !isCreatingNew && editingZone) {
+      // No zone selected on canvas, and not creating new, so close editor if it was open
+      handleCancel();
+    }
+  }, [selectedZoneId, eventZones, editingZone, isCreatingNew]); // Removed handleEdit from deps for now, assuming it's stable or this effect is simpler.
 
   const handleSave = () => {
     if (isCreatingNew) {
@@ -75,6 +124,8 @@ const EventZoneEditor: React.FC<EventZoneEditorProps> = ({
   const handleCancel = () => {
     setIsCreatingNew(false);
     setEditingZone(null);
+    // Optionally, deselect zone on cancel if it's not the selected one from canvas:
+    // if (editingZone?.id === selectedZoneId) setSelectedZoneId(null); 
   };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -156,24 +207,35 @@ const EventZoneEditor: React.FC<EventZoneEditorProps> = ({
       )}
 
       <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-        {eventZones.map(zone => (
-          <div key={zone.id} className={`p-2.5 bg-background-primary rounded-md shadow-sm flex justify-between items-center group ${editingZone?.id === zone.id ? 'ring-2 ring-accent-primary' : ''}`}>
-            <div className="flex-grow min-w-0">
-              <p className="font-medium text-text-primary text-sm truncate group-hover:text-clip">
-                <span style={{ color: zone.color, marginRight: '8px' }}>●</span> 
-                {zone.commandName}
-              </p>
-              <p className="text-xs text-text-tertiary truncate group-hover:text-clip">
-                ID: {zone.id.substring(5,12)} | ({zone.x.toFixed(1)}, {zone.y.toFixed(1)}) R: {zone.radius.toFixed(1)}m | {zone.triggerType}
-                {zone.triggerType === 'whileInZone' && zone.onExitCommandName ? ` | Exit: ${zone.onExitCommandName.substring(0,10)}${zone.onExitCommandName.length > 10 ? '...' : '' }` : ''}
-              </p>
+        {eventZones.map(zone => {
+          const isSelected = zone.id === selectedZoneId;
+          const isEditingThis = editingZone?.id === zone.id;
+          let ringClass = '';
+          if (isEditingThis) ringClass = 'ring-2 ring-accent-primary'; // Editing has priority for ring
+          else if (isSelected) ringClass = 'ring-2 ring-accent-info'; // Selected but not editing
+
+          return (
+            <div 
+              key={zone.id} 
+              className={`p-2.5 bg-background-primary rounded-md shadow-sm flex justify-between items-center group ${ringClass} ${isSelected && !isEditingThis ? 'bg-opacity-80' : ''}`}
+            >
+              <div className="flex-grow min-w-0">
+                <p className="font-medium text-text-primary text-sm truncate group-hover:text-clip">
+                  <span style={{ color: zone.color, marginRight: '8px' }}>●</span> 
+                  {zone.commandName}
+                </p>
+                <p className="text-xs text-text-tertiary truncate group-hover:text-clip">
+                  ID: {zone.id.substring(5,12)} | ({zone.x.toFixed(1)}, {zone.y.toFixed(1)}) R: {zone.radius.toFixed(1)}m | {zone.triggerType}
+                  {zone.triggerType === 'whileInZone' && zone.onExitCommandName ? ` | Exit: ${zone.onExitCommandName.substring(0,10)}${zone.onExitCommandName.length > 10 ? '...' : '' }` : ''}
+                </p>
+              </div>
+              <div className="flex space-x-1.5 flex-shrink-0 ml-2">
+                <button onClick={() => handleEdit(zone)} title="Edit Zone" className="p-1.5 text-text-secondary hover:text-accent-primary rounded"><Edit3 size={14} /></button>
+                <button onClick={() => onDeleteEventZone(zone.id)} title="Delete Zone" className="p-1.5 text-text-secondary hover:text-error-color rounded"><Trash2 size={14} /></button>
+              </div>
             </div>
-            <div className="flex space-x-1.5 flex-shrink-0 ml-2">
-              <button onClick={() => handleEdit(zone)} title="Edit Zone" className="p-1.5 text-text-secondary hover:text-accent-primary rounded"><Edit3 size={14} /></button>
-              <button onClick={() => onDeleteEventZone(zone.id)} title="Delete Zone" className="p-1.5 text-text-secondary hover:text-error-color rounded"><Trash2 size={14} /></button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

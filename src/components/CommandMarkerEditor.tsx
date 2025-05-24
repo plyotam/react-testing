@@ -10,6 +10,8 @@ interface CommandMarkerEditorProps {
   onDeleteCommandMarker: (markerId: string) => void;
   pendingCommandMarkerCreation: { s: number, time: number, x: number, y: number } | null;
   clearPendingCommandMarkerCreation: () => void;
+  selectedCommandMarkerId: string | null;
+  setSelectedCommandMarkerId: (id: string | null) => void;
 }
 
 // Define a type for the form data to ensure commandParams is always at least {}
@@ -36,9 +38,11 @@ const CommandMarkerEditor: React.FC<CommandMarkerEditorProps> = ({
   onDeleteCommandMarker,
   pendingCommandMarkerCreation,
   clearPendingCommandMarkerCreation,
+  selectedCommandMarkerId,
+  setSelectedCommandMarkerId,
 }) => {
   const [isCreating, setIsCreating] = useState(false);
-  const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null);
+  const [editingMarkerId, setEditingMarkerId] = useState<string | null>(null); // Tracks the ID of the marker being edited in the form
   const [newMarkerData, setNewMarkerData] = useState<FormState>(initialFormState);
 
   const handleStartCreate = useCallback(() => {
@@ -149,18 +153,59 @@ const CommandMarkerEditor: React.FC<CommandMarkerEditorProps> = ({
     setNewMarkerData(initialFormState);
   };
 
-  const handleEdit = (marker: CommandMarker) => {
+  const handleEdit = useCallback((marker: CommandMarker) => {
     setIsCreating(false);
     setEditingMarkerId(marker.id);
+    setSelectedCommandMarkerId(marker.id); // Ensure selection is synced
     // Ensure commandParams is an object for the form state, even if undefined on original marker
-    setNewMarkerData({ ...marker, commandParams: marker.commandParams || {} }); 
-  };
+    setNewMarkerData({ ...marker, commandParams: marker.commandParams || {} });
+  }, [setSelectedCommandMarkerId]);
 
-  const handleCancel = () => {
+  const handleCancel = useCallback(() => {
     setIsCreating(false);
     setEditingMarkerId(null);
     setNewMarkerData(initialFormState);
-  };
+    // If the form is cancelled for the selected marker, also clear the global selection
+    if (editingMarkerId === selectedCommandMarkerId) {
+      setSelectedCommandMarkerId(null);
+    }
+  }, [selectedCommandMarkerId, editingMarkerId, setSelectedCommandMarkerId]);
+
+  // Effect to sync form with external s/time changes (e.g., from dragging)
+  useEffect(() => {
+    if (editingMarkerId && editingMarkerId === selectedCommandMarkerId) {
+      const currentMarkerInApp = commandMarkers.find(m => m.id === editingMarkerId);
+      if (currentMarkerInApp) {
+        if (
+          newMarkerData.s !== currentMarkerInApp.s ||
+          newMarkerData.time !== currentMarkerInApp.time
+        ) {
+          setNewMarkerData(prevData => ({
+            ...prevData,
+            s: currentMarkerInApp.s,
+            time: currentMarkerInApp.time,
+            // renderX and renderY are not directly part of newMarkerData for form editing
+          }));
+        }
+      }
+    }
+  }, [commandMarkers, selectedCommandMarkerId, editingMarkerId, newMarkerData.s, newMarkerData.time]);
+
+
+  // Effect to open/close editor based on canvas selection
+  useEffect(() => {
+    if (selectedCommandMarkerId && editingMarkerId !== selectedCommandMarkerId && !isCreating) {
+      const markerToEdit = commandMarkers.find(m => m.id === selectedCommandMarkerId);
+      if (markerToEdit) {
+        handleEdit(markerToEdit);
+      } else {
+        handleCancel(); // Selected marker not found
+      }
+    } else if (!selectedCommandMarkerId && !isCreating && editingMarkerId) {
+      handleCancel(); // No marker selected on canvas, close editor
+    }
+  }, [selectedCommandMarkerId, commandMarkers, editingMarkerId, isCreating, handleEdit, handleCancel]);
+
 
   const isDisabled = optimizedPath.length === 0;
 
@@ -172,7 +217,7 @@ const CommandMarkerEditor: React.FC<CommandMarkerEditorProps> = ({
       <h3 className="text-lg font-semibold mb-2 border-b border-border-color-primary pb-1">Path Command Markers</h3>
       {isDisabled && <p className="text-sm text-text-secondary mb-2">Create an optimized path first to add command markers.</p>}
       
-      {(!isCreating && !editingMarkerId) && (
+      {(!isCreating && !editingMarkerId) && ( // Show "Add New" only if no form is open
         <button
           onClick={handleStartCreate}
           disabled={isDisabled}
@@ -182,9 +227,11 @@ const CommandMarkerEditor: React.FC<CommandMarkerEditorProps> = ({
         </button>
       )}
 
-      {(isCreating || editingMarkerId) && (
+      {(isCreating || editingMarkerId) && ( // Show form if creating or editing
         <div className="mb-4 p-3 bg-background-tertiary rounded-md shadow">
-          <h4 className="text-md font-semibold mb-2 text-text-primary">{editingMarkerId ? 'Edit' : 'New'} Marker</h4>
+          <h4 className="text-md font-semibold mb-2 text-text-primary">
+            {isCreating ? 'New Marker' : (editingMarkerId ? `Edit Marker: ${commandMarkers.find(m=>m.id === editingMarkerId)?.commandName || ''}` : 'Marker Details')}
+          </h4>
           <div className="space-y-2 text-sm">
             <div>
               <label htmlFor="s" className="block text-xs font-medium text-text-secondary">Distance (s, meters)</label>
@@ -261,41 +308,52 @@ const CommandMarkerEditor: React.FC<CommandMarkerEditorProps> = ({
 
       {commandMarkers.length > 0 && (
         <div className="space-y-2 max-h-60 overflow-y-auto pr-1">
-          {commandMarkers.map((marker) => (
-            <div key={marker.id} className="p-2.5 bg-background-tertiary rounded-md shadow-sm hover:shadow-md transition-shadow duration-150 ease-in-out">
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="font-semibold text-text-primary text-sm">{marker.commandName}</p>
-                  <p className="text-xs text-text-secondary">
-                    s: {marker.s.toFixed(2)}m, t: {marker.time.toFixed(2)}s
-                  </p>
+          {commandMarkers.map((marker) => {
+            const isSelected = marker.id === selectedCommandMarkerId;
+            const isEditingThis = marker.id === editingMarkerId;
+            let ringClass = '';
+            if (isEditingThis) ringClass = 'ring-2 ring-accent-primary'; // Editing has priority
+            else if (isSelected) ringClass = 'ring-2 ring-accent-info'; 
+
+            return (
+              <div 
+                key={marker.id} 
+                className={`p-2.5 bg-background-tertiary rounded-md shadow-sm hover:shadow-md transition-shadow duration-150 ease-in-out ${ringClass} ${isSelected && !isEditingThis ? 'bg-opacity-80' : ''}`}
+              >
+                <div className="flex justify-between items-center">
+                  <div>
+                    <p className="font-semibold text-text-primary text-sm">{marker.commandName}</p>
+                    <p className="text-xs text-text-secondary">
+                      s: {marker.s.toFixed(2)}m, t: {marker.time.toFixed(2)}s
+                    </p>
+                  </div>
+                  <div className="flex space-x-1.5">
+                    <button
+                      onClick={() => handleEdit(marker)}
+                      disabled={isDisabled}
+                      className="p-1.5 text-text-secondary hover:text-accent-info rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title="Edit Marker"
+                    >
+                      <FaEdit />
+                    </button>
+                    <button
+                      onClick={() => onDeleteCommandMarker(marker.id)}
+                      disabled={isDisabled}
+                      className="p-1.5 text-text-secondary hover:text-accent-danger rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title="Delete Marker"
+                    >
+                      <FaTrash />
+                    </button>
+                  </div>
                 </div>
-                <div className="flex space-x-1.5">
-                  <button
-                    onClick={() => handleEdit(marker)}
-                    disabled={isDisabled}
-                    className="p-1.5 text-text-secondary hover:text-accent-info rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    title="Edit Marker"
-                  >
-                    <FaEdit />
-                  </button>
-                  <button
-                    onClick={() => onDeleteCommandMarker(marker.id)}
-                    disabled={isDisabled}
-                    className="p-1.5 text-text-secondary hover:text-accent-danger rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    title="Delete Marker"
-                  >
-                    <FaTrash />
-                  </button>
-                </div>
+                {marker.commandParams && Object.keys(marker.commandParams).length > 0 && (
+                  <pre className="mt-1.5 text-xs bg-background-primary p-1.5 rounded text-text-tertiary overflow-x-auto">
+                    {JSON.stringify(marker.commandParams, null, 2)}
+                  </pre>
+                )}
               </div>
-              {marker.commandParams && Object.keys(marker.commandParams).length > 0 && (
-                <pre className="mt-1.5 text-xs bg-background-primary p-1.5 rounded text-text-tertiary overflow-x-auto">
-                  {JSON.stringify(marker.commandParams, null, 2)}
-                </pre>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
        {commandMarkers.length === 0 && !isDisabled && !isCreating && !editingMarkerId && (

@@ -47,6 +47,11 @@ const HolonomicPathOptimizer = () => {
   const [pendingEventZoneCreation, setPendingEventZoneCreation] = useState<{ x: number, y: number } | null>(null);
   const [pendingCommandMarkerCreation, setPendingCommandMarkerCreation] = useState<{ s: number, time: number, x: number, y: number } | null>(null);
   const [canvasMousePosition, setCanvasMousePosition] = useState<Point | null>(null);
+  const [selectedZoneId, setSelectedZoneId] = useState<string | null>(null);
+  const [draggingZoneId, setDraggingZoneId] = useState<string | null>(null);
+  const [resizingZoneId, setResizingZoneId] = useState<string | null>(null);
+  const [selectedCommandMarkerId, setSelectedCommandMarkerId] = useState<string | null>(null);
+  const [draggingCommandMarkerId, setDraggingCommandMarkerId] = useState<string | null>(null);
 
   const [editorPosition, setEditorPosition] = useState({ x: 50, y: 150 });
   const [isDraggingEditor, setIsDraggingEditor] = useState(false);
@@ -107,8 +112,24 @@ const HolonomicPathOptimizer = () => {
     );
   };
 
+  const updateEventZoneRadius = (zoneId: string, newRadius: number) => {
+    setEventZones(prevZones =>
+      prevZones.map(zone =>
+        zone.id === zoneId ? { ...zone, radius: Math.max(0.1, newRadius) } : zone // Ensure min radius
+      )
+    );
+  };
+
   const deleteCommandMarker = (markerId: string) => {
     setCommandMarkers(prev => prev.filter(marker => marker.id !== markerId));
+  };
+
+  const updateCommandMarkerPosition = (markerId: string, newS: number, newTime: number) => {
+    setCommandMarkers(prevMarkers =>
+      prevMarkers.map(marker =>
+        marker.id === markerId ? { ...marker, s: newS, time: newTime } : marker
+      ).sort((a,b) => a.s - b.s) // Keep sorted by s
+    );
   };
 
   const addEventZone = (zoneData: Omit<EventZone, 'id'>) => {
@@ -125,6 +146,14 @@ const HolonomicPathOptimizer = () => {
 
   const deleteEventZone = (zoneId: string) => {
     setEventZones(prev => prev.filter(zone => zone.id !== zoneId));
+  };
+
+  const updateEventZoneCoordinates = (zoneId: string, newX: number, newY: number) => {
+    setEventZones(prevZones =>
+      prevZones.map(zone =>
+        zone.id === zoneId ? { ...zone, x: newX, y: newY } : zone
+      )
+    );
   };
 
   const initiatePendingEventZone = (x: number, y: number) => {
@@ -212,6 +241,22 @@ const HolonomicPathOptimizer = () => {
     optimizedPath,
     initiatePendingCommandMarker,
     setCanvasMousePosition, // Pass setter to event handlers
+    eventZones, // Pass eventZones for hit testing
+    selectedZoneId, // Pass selectedZoneId
+    setSelectedZoneId, // Pass setSelectedZoneId
+    draggingZoneId, // Pass draggingZoneId
+    setDraggingZoneId, // Pass setDraggingZoneId
+    updateEventZoneCoordinates, // Pass update function
+    resizingZoneId, // Pass resizingZoneId
+    setResizingZoneId, // Pass setResizingZoneId
+    updateEventZoneRadius, // Pass update function for radius
+    commandMarkers, // Pass commandMarkers for hit testing
+    optimizedPath, // Pass optimizedPath for snapping
+    selectedCommandMarkerId,
+    setSelectedCommandMarkerId,
+    draggingCommandMarkerId,
+    setDraggingCommandMarkerId,
+    updateCommandMarkerPosition,
   });
 
   const deleteWaypoint = (index: number) => {
@@ -994,7 +1039,9 @@ const HolonomicPathOptimizer = () => {
       eventZones, 
       commandMarkers,
     editorMode, // Add editorMode as a dependency
-    currentMousePosition: canvasMousePosition, 
+    canvasMousePosition, // Add canvasMousePosition as a dependency
+    selectedZoneId, // Add selectedZoneId as a dependency for highlighting
+    selectedCommandMarkerId, // Add selectedCommandMarkerId for highlighting
     });
   }, [
     config, 
@@ -1012,6 +1059,8 @@ const HolonomicPathOptimizer = () => {
     commandMarkers,
     editorMode,
     canvasMousePosition,
+    selectedZoneId,
+    selectedCommandMarkerId,
     canvasRef // Though canvasRef itself doesn't change, its availability might gate the effect
   ]);
 
@@ -1050,6 +1099,10 @@ const HolonomicPathOptimizer = () => {
     onAddEventZone: addEventZone,
     onUpdateEventZone: updateEventZone,
     onDeleteEventZone: deleteEventZone,
+    selectedZoneId, // Pass to AppUI for EventZoneEditor
+    setSelectedZoneId, // Pass to AppUI for EventZoneEditor
+    selectedCommandMarkerId, // Pass to AppUI for CommandMarkerEditor
+    setSelectedCommandMarkerId, // Pass to AppUI for CommandMarkerEditor
   };
 
   return <AppUI {...appUIProps} />;

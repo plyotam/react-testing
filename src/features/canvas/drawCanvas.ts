@@ -2,6 +2,31 @@
 import { Waypoint, Point, RobotState, OptimizedPathPoint, EventZone, CommandMarker } from '../../types';
 import { Config } from '../../config/appConfig';
 
+// Helper function to convert hex to rgba
+function hexToRgba(hex: string, alpha: number = 1): string {
+  // Remove # if present
+  hex = hex.startsWith('#') ? hex.slice(1) : hex;
+
+  // Handle short hex (e.g., #RGB)
+  if (hex.length === 3) {
+    hex = hex.split('').map(char => char + char).join('');
+  }
+
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+
+  if (isNaN(r) || isNaN(g) || isNaN(b)) {
+    // Fallback for invalid hex - could return a default color or throw error
+    console.warn(`Invalid hex color: ${hex}. Using default fallback.`);
+    return `rgba(255, 165, 0, ${alpha})`; // Default to orange with specified alpha
+  }
+
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+
+import { Point } from '../../types'; // Ensure Point is imported
 
 interface DrawCanvasArgs {
   canvas: HTMLCanvasElement;
@@ -21,6 +46,8 @@ interface DrawCanvasArgs {
   commandMarkers: CommandMarker[];
   editorMode: 'waypoints' | 'addEventZoneCenter' | 'addCommandMarker';
   currentMousePosition: Point | null; // x, y in meters
+  selectedZoneId: string | null; // For highlighting selected zone
+  selectedCommandMarkerId: string | null; // For highlighting selected command marker
 }
 
 export const drawCanvasContent = ({
@@ -41,6 +68,8 @@ export const drawCanvasContent = ({
   commandMarkers,
   editorMode,
   currentMousePosition,
+  selectedZoneId,
+  selectedCommandMarkerId,
 }: DrawCanvasArgs) => {
   const canvasWidth = metersToPixels(config.field.width);
   const canvasHeight = metersToPixels(config.field.height);
@@ -209,15 +238,67 @@ export const drawCanvasContent = ({
     const zoneX = metersToPixels(zone.x);
     const zoneY = metersToPixels(zone.y);
     const zoneRadius = metersToPixels(zone.radius);
+    const isSelected = zone.id === selectedZoneId;
+    const baseColor = zone.color || '#FFA500'; // Default to orange, matches EventZoneEditor
+    const fillAlpha = 0.4; 
+    const borderAlpha = 0.8;
+    const selectedBorderAlpha = 0.9; // More opaque for selected border
+    const selectedFillAlpha = 0.5; // Slightly more opaque fill for selected
+
+    let fillStyle: string;
+    let strokeStyle: string;
+
+    if (baseColor.startsWith('#')) {
+      fillStyle = hexToRgba(baseColor, isSelected ? selectedFillAlpha : fillAlpha);
+      strokeStyle = hexToRgba(baseColor, isSelected ? selectedBorderAlpha : borderAlpha);
+    } else if (baseColor.startsWith('rgba')) {
+      // Attempt to parse and reconstruct RGBA to ensure correct alpha
+      try {
+        const parts = baseColor.match(/[\d\.]+/g);
+        if (parts && parts.length >= 3) {
+          const r = parts[0];
+          const g = parts[1];
+          const b = parts[2];
+          fillStyle = `rgba(${r}, ${g}, ${b}, ${isSelected ? selectedFillAlpha : fillAlpha})`;
+          strokeStyle = `rgba(${r}, ${g}, ${b}, ${isSelected ? selectedBorderAlpha : borderAlpha})`;
+        } else {
+          throw new Error('Invalid RGBA string');
+        }
+      } catch (e) {
+        console.warn(`Error parsing RGBA string ${baseColor}:`, e);
+        fillStyle = hexToRgba('#FFA500', isSelected ? selectedFillAlpha : fillAlpha); // Fallback
+        strokeStyle = hexToRgba('#FFA500', isSelected ? selectedBorderAlpha : borderAlpha); // Fallback
+      }
+    } else { 
+      // Fallback for unknown formats
+      fillStyle = hexToRgba('#FFA500', isSelected ? selectedFillAlpha : fillAlpha);
+      strokeStyle = hexToRgba('#FFA500', isSelected ? selectedBorderAlpha : borderAlpha);
+    }
     
     ctx.save();
-    ctx.strokeStyle = zone.color || 'rgba(255, 165, 0, 0.7)'; // Default orange-ish
-    ctx.fillStyle = zone.color ? zone.color.replace(/[^,]+$/, '0.3)') : 'rgba(255, 165, 0, 0.3)'; // Lighter fill
-    ctx.lineWidth = 2;
+    // If selected, the gold border takes precedence for stroke
+    ctx.strokeStyle = isSelected ? hexToRgba('#FFD700', selectedBorderAlpha) : strokeStyle;
+    ctx.fillStyle = fillStyle;
+    ctx.lineWidth = isSelected ? 3 : 2; // Thicker border if selected
     ctx.beginPath();
     ctx.arc(zoneX, zoneY, zoneRadius, 0, 2 * Math.PI);
     ctx.fill();
     ctx.stroke();
+
+    // Draw resize handle if selected
+    if (isSelected) {
+      const handleRadiusPixels = 5; // Pixel size for the handle
+      const handleX = zoneX + zoneRadius; // Right edge of the circle in pixels
+      const handleY = zoneY; // Middle of the circle in pixels
+
+      ctx.fillStyle = '#FFD700'; // Gold, same as selection
+      ctx.strokeStyle = '#000000'; // Black border for handle
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(handleX, handleY, handleRadiusPixels, 0, 2 * Math.PI);
+      ctx.fill();
+      ctx.stroke();
+    }
     
     // Draw command name with improved legibility
     const minPixelRadiusForText = 20; // Only draw text if zone radius is at least 20 pixels
@@ -244,13 +325,14 @@ export const drawCanvasContent = ({
       if (marker.renderX !== undefined && marker.renderY !== undefined) {
         const markerX = metersToPixels(marker.renderX);
         const markerY = metersToPixels(marker.renderY);
+        const isSelected = marker.id === selectedCommandMarkerId;
         
         ctx.save();
         // New style for command markers: filled circle with border
-        const markerRadius = 5; // pixels
+        const markerRadius = isSelected ? 7 : 5; // Larger if selected
         ctx.fillStyle = '#FFFF00'; // Bright Yellow
-        ctx.strokeStyle = '#000000'; // Black border
-        ctx.lineWidth = 1; // Border width
+        ctx.strokeStyle = isSelected ? '#FF00FF' : '#000000'; // Magenta border if selected, else black
+        ctx.lineWidth = isSelected ? 2 : 1; // Thicker border if selected
         
         ctx.beginPath();
         ctx.arc(markerX, markerY, markerRadius, 0, 2 * Math.PI);
