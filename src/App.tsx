@@ -103,7 +103,7 @@ const HolonomicPathOptimizer = () => {
   }>({ 
     x: 1, y: 1, rotation: 0, velocity: 0, angularVelocity: 0 
   });
-  const [showConfig, setShowConfig] = useState(true);
+  const [showConfig, setShowConfig] = useState(false);
   const [pathName, setPathName] = useState('Steamplanner');
   const [backgroundImage, setBackgroundImage] = useState<HTMLImageElement | null>(null);
   const [optimizationMetrics, setOptimizationMetrics] = useState<{
