@@ -6,6 +6,7 @@ import ConfigInput from './components/ConfigInput';
 import { Waypoint } from './types/Waypoint';
 import SimulationGraphs from './components/SimulationGraphs';
 import WaypointEditorPopup from './components/WaypointEditorPopup'; // Import the new component
+import FloatingGraphPopup from './components/FloatingGraphPopup'; // Import the new graph popup
 
 interface SimulationDataPoint {
   time: number;
@@ -128,12 +129,34 @@ const HolonomicPathOptimizer = () => {
   const [isDraggingEditor, setIsDraggingEditor] = useState(false);
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
 
+  // State for draggable graph popup
+  const [showFloatingGraphs, setShowFloatingGraphs] = useState(false);
+  const [floatingGraphPosition, setFloatingGraphPosition] = useState({ x: window.innerWidth - 500, y: 150 });
+  const [isDraggingFloatingGraphs, setIsDraggingFloatingGraphs] = useState(false);
+  const [floatingGraphsDragStartOffset, setFloatingGraphsDragStartOffset] = useState({ x: 0, y: 0 });
+
+  // State for simulation time slider
+  const [displayTime, setDisplayTime] = useState(0);
+  const [isScrubbing, setIsScrubbing] = useState(false);
+
   const animationFrameIdRef = useRef<number | null>(null);
   const lastTimestampRef = useRef<number | null>(null);
   const currentPathIndexRef = useRef<number>(0);
   const simulatedTimeRef = useRef<number>(0);
   const isPausedForStopPointRef = useRef<boolean>(false);
   const lastStoppedWaypointIndexRef = useRef<number | null>(null);
+
+  const resetSimulationState = () => {
+    setIsPlaying(false);
+    currentPathIndexRef.current = 0;
+    simulatedTimeRef.current = 0;
+    setDisplayTime(0);
+    lastTimestampRef.current = null;
+    isPausedForStopPointRef.current = false;
+    lastStoppedWaypointIndexRef.current = null;
+    // Do not clear robot state here if we want it to remain at the end of path
+    // Do not clear simulation history here if we want graphs to persist
+  };
 
   const showMessage = useCallback((type: 'error' | 'info', text: string) => {
     setMessage({ type, text });
@@ -1054,7 +1077,10 @@ const HolonomicPathOptimizer = () => {
         cancelAnimationFrame(animationFrameIdRef.current);
         animationFrameIdRef.current = null;
       }
-      isPausedForStopPointRef.current = false; 
+      // Only set isPausedForStopPointRef to false, don't reset other sim state here
+      // if we want scrubbing to work when paused.
+      // resetSimulationState(); // Keep history and robot position for scrubbing
+      isPausedForStopPointRef.current = false;
       return;
     }
 
@@ -1073,6 +1099,7 @@ const HolonomicPathOptimizer = () => {
       const deltaTime = ((timestamp - lastTimestampRef.current) / 1000) * simulationSpeedFactor;
       lastTimestampRef.current = timestamp;
       simulatedTimeRef.current += deltaTime;
+      setDisplayTime(simulatedTimeRef.current); // Update slider display time
 
       let newPathIndex = optimizedPath.findIndex(p => p.time >= simulatedTimeRef.current);
 
@@ -1095,7 +1122,7 @@ const HolonomicPathOptimizer = () => {
           velocity: 0, 
           angularVelocity: 0
         });
-        setIsPlaying(false);
+        setIsPlaying(false); // Simulation ends
         showMessage('info', 'Simulation finished!');
         return;
       }
@@ -1240,7 +1267,7 @@ const HolonomicPathOptimizer = () => {
       }
       lastTimestampRef.current = null; 
     };
-  }, [isPlaying, optimizedPath, waypoints, config.waypoint.defaultStopDuration, simulationSpeedFactor, showMessage, interpolateAngleDeg, robotState.rotation, waypointSHeadings, config.robot.maxAcceleration, addDataPointToHistory]); // Added missing dependencies
+  }, [isPlaying, optimizedPath, waypoints, config.waypoint.defaultStopDuration, simulationSpeedFactor, showMessage, interpolateAngleDeg, robotState.rotation, waypointSHeadings, config.robot.maxAcceleration, addDataPointToHistory, isScrubbing]); // Added missing dependencies
 
   // Modified to take index directly for the new component
   const updateWaypointByIndex = (index: number, field: keyof Waypoint, value: any) => {
@@ -1285,6 +1312,140 @@ const HolonomicPathOptimizer = () => {
       window.removeEventListener('mouseup', handleEditorMouseUp);
     };
   }, [isDraggingEditor, handleEditorMouseMove, handleEditorMouseUp]);
+
+  // Drag handlers for the Floating Graph Popup
+  const handleFloatingGraphMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    setIsDraggingFloatingGraphs(true);
+    setFloatingGraphsDragStartOffset({
+      x: e.clientX - floatingGraphPosition.x,
+      y: e.clientY - floatingGraphPosition.y,
+    });
+    e.preventDefault();
+  };
+
+  const handleFloatingGraphMouseMove = useCallback((e: MouseEvent) => {
+    if (!isDraggingFloatingGraphs) return;
+    setFloatingGraphPosition({
+      x: e.clientX - floatingGraphsDragStartOffset.x,
+      y: e.clientY - floatingGraphsDragStartOffset.y,
+    });
+  }, [isDraggingFloatingGraphs, floatingGraphsDragStartOffset]);
+
+  const handleFloatingGraphMouseUp = useCallback(() => {
+    setIsDraggingFloatingGraphs(false);
+  }, []);
+
+  useEffect(() => {
+    if (isDraggingEditor) {
+      window.addEventListener('mousemove', handleEditorMouseMove);
+      window.addEventListener('mouseup', handleEditorMouseUp);
+    } else if (isDraggingFloatingGraphs) {
+      window.addEventListener('mousemove', handleFloatingGraphMouseMove);
+      window.addEventListener('mouseup', handleFloatingGraphMouseUp);
+    } else {
+      window.removeEventListener('mousemove', handleEditorMouseMove);
+      window.removeEventListener('mouseup', handleEditorMouseUp);
+      window.removeEventListener('mousemove', handleFloatingGraphMouseMove);
+      window.removeEventListener('mouseup', handleFloatingGraphMouseUp);
+    }
+    return () => {
+      window.removeEventListener('mousemove', handleEditorMouseMove);
+      window.removeEventListener('mouseup', handleEditorMouseUp);
+      window.removeEventListener('mousemove', handleFloatingGraphMouseMove);
+      window.removeEventListener('mouseup', handleFloatingGraphMouseUp);
+    };
+  }, [isDraggingEditor, handleEditorMouseMove, handleEditorMouseUp, isDraggingFloatingGraphs, handleFloatingGraphMouseMove, handleFloatingGraphMouseUp]);
+
+  // Simulation Time Slider Handler
+  const handleTimeSliderChange = (newTime: number) => {
+    if (isPlaying) {
+      // If user scrubs while playing, pause the simulation first
+      // Consider if this is desired behavior or if scrubbing should just take over
+      // setIsPlaying(false); 
+    }
+    setIsScrubbing(true); // Indicate scrubbing is active
+    
+    simulatedTimeRef.current = newTime;
+    setDisplayTime(newTime);
+
+    let newPathIndex = optimizedPath.findIndex(p => p.time >= newTime);
+    if (newPathIndex === -1 && optimizedPath.length > 0) {
+      newPathIndex = optimizedPath.length - 1; // Go to last point if scrubbed past end
+    }
+    if (newPathIndex === -1) newPathIndex = 0; // Default to first if no path
+
+    currentPathIndexRef.current = newPathIndex;
+    const currentPathPoint = optimizedPath[newPathIndex];
+
+    if (currentPathPoint) {
+      // Logic to interpolate robot rotation based on scrubbed time (similar to simulationStep)
+      let newRobotRotation = robotState.rotation; // Default to current if no heading info
+      if (waypointSHeadings.length > 0) {
+        const currentS = currentPathPoint.s;
+        let prevTarget: {s: number, heading: number} | null = null;
+        for (let i = waypointSHeadings.length - 1; i >= 0; i--) {
+            if (waypointSHeadings[i].s <= currentS) {
+                prevTarget = waypointSHeadings[i];
+                break;
+            }
+        }
+        let nextTarget: {s: number, heading: number} | null = null;
+        for (let i = 0; i < waypointSHeadings.length; i++) {
+            if (waypointSHeadings[i].s > currentS) {
+                nextTarget = waypointSHeadings[i];
+                break;
+            }
+        }
+        if (prevTarget && nextTarget) {
+            if (prevTarget.s < nextTarget.s && currentS >= prevTarget.s && currentS <= nextTarget.s) {
+               const t = (nextTarget.s - prevTarget.s === 0) ? 1 : (currentS - prevTarget.s) / (nextTarget.s - prevTarget.s); // Avoid div by zero
+               newRobotRotation = interpolateAngleDeg(prevTarget.heading, nextTarget.heading, Math.max(0, Math.min(1, t)));
+            } else { 
+               newRobotRotation = prevTarget.heading;
+            }
+        } else if (prevTarget) {
+            newRobotRotation = prevTarget.heading;
+        } else if (nextTarget) { 
+            newRobotRotation = nextTarget.heading;
+        } else if (optimizedPath.length > 0 && optimizedPath[0].heading !== undefined) {
+            // Fallback to initial path point heading if no waypoint headings apply
+            newRobotRotation = optimizedPath[0].heading;
+        }
+    }
+
+      setRobotState({
+        x: currentPathPoint.x,
+        y: currentPathPoint.y,
+        rotation: newRobotRotation,
+        velocity: currentPathPoint.velocity,
+        angularVelocity: 0 // Or derive if needed from path data
+      });
+    } else if (optimizedPath.length > 0) {
+        // If scrubbed before start, reset to first point state
+        setRobotState({
+            x: optimizedPath[0].x,
+            y: optimizedPath[0].y,
+            rotation: optimizedPath[0].heading,
+            velocity: optimizedPath[0].velocity,
+            angularVelocity: 0
+        });
+    } else {
+        // No path, reset to default initial state
+         setRobotState({ x: 1, y: 1, rotation: 0, velocity: 0, angularVelocity: 0 });
+    }
+    // drawCanvas(); // drawCanvas is called via useEffect on robotState change
+  };
+
+  const handleTimeSliderMouseUp = () => {
+    setIsScrubbing(false);
+    // If simulation was paused by scrubbing, user might expect it to stay paused.
+    // Or, if it was playing, it could resume. For now, keep it paused.
+    if (isPlaying) {
+        // setIsPlaying(false); // Ensures it stays paused after scrubbing
+    }
+  };
+
+  const totalPathTime = optimizedPath.length > 0 ? optimizedPath[optimizedPath.length - 1].time : 0;
 
   return (
     <div className="w-full h-screen bg-background-primary flex text-text-primary font-sans overflow-hidden relative"> {/* Added relative for positioning context */}
@@ -1343,7 +1504,7 @@ const HolonomicPathOptimizer = () => {
                 </div>
 
                 <button
-                  onClick={() => setShowGraphs(true)}
+                  onClick={() => setShowFloatingGraphs(true)}
                   title="Show Simulation Graphs"
                   className="p-2 bg-background-tertiary text-text-secondary rounded-lg hover:bg-accent-primary hover:text-white transform hover:scale-105 shadow-md"
                 >
@@ -1424,6 +1585,24 @@ const HolonomicPathOptimizer = () => {
              {/* Grid lines overlay could be added here if needed, or drawn on canvas itself */}
           </div>
 
+          {/* Simulation Time Slider */}
+          {optimizedPath.length > 0 && (
+            <div className="m-4 p-3 bg-background-secondary/50 rounded-lg shadow-md flex items-center gap-3">
+              <span className="text-sm text-text-secondary min-w-[90px]">Time: {displayTime.toFixed(2)}s / {totalPathTime.toFixed(2)}s</span>
+              <input
+                type="range"
+                min={0}
+                max={totalPathTime}
+                step={0.01} // Or a larger step for performance on very long paths
+                value={displayTime}
+                onChange={(e) => handleTimeSliderChange(parseFloat(e.target.value))}
+                onMouseDown={() => setIsScrubbing(true)} // Also set isScrubbing on direct interaction start
+                onMouseUp={handleTimeSliderMouseUp}
+                className="w-full h-3 bg-background-primary rounded-lg appearance-none cursor-pointer accent-accent-primary"
+              />
+            </div>
+          )}
+
           {/* Hidden file inputs for background image and path import */}
           <input
             ref={imageInputRef}
@@ -1459,12 +1638,22 @@ const HolonomicPathOptimizer = () => {
           onDragStart={handleEditorMouseDown}
         />
       )}
+      
+      {/* Floating Graph Popup */}
+      <FloatingGraphPopup
+          history={simulationHistory}
+          onClose={() => setShowFloatingGraphs(false)}
+          editorPosition={floatingGraphPosition}
+          onDragStart={handleFloatingGraphMouseDown}
+          isVisible={showFloatingGraphs}
+      />
 
-      {/* Sidebar */} 
-      <div className={`w-96 bg-background-secondary shadow-xl p-6 space-y-5 overflow-y-auto transition-all duration-300 ease-in-out ${showConfig ? 'mr-0' : '-mr-96 opacity-0'}`}>
-        
-        {/* Config Editor */} 
-        <div className="bg-background-tertiary/50 rounded-xl shadow-lg p-5 space-y-4 backdrop-blur-sm">
+      {/* Sidebar */}
+      {showConfig && (
+        <div className={`w-96 bg-background-secondary shadow-xl p-6 space-y-5 overflow-y-auto transition-all duration-300 ease-in-out ${showConfig ? 'mr-0' : '-mr-96 opacity-0'}`}>
+          
+          {/* Config Editor */}
+          <div className="bg-background-tertiary/50 rounded-xl shadow-lg p-5 space-y-4 backdrop-blur-sm">
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-accent-primary">
               <Settings size={20} />
               Configuration
@@ -1533,7 +1722,8 @@ const HolonomicPathOptimizer = () => {
             </div>
         </div>
 
-      </div> {/* Closes the sidebar div */}
+      </div> /* Closes the sidebar div */
+      )}
 
       {/* Message Box */}
       {message && (
@@ -1542,8 +1732,8 @@ const HolonomicPathOptimizer = () => {
         </div>
       )}
 
-      {/* Simulation Graphs Pop-out */}
-      {showGraphs && <SimulationGraphs history={simulationHistory} onClose={() => setShowGraphs(false)} />}
+      {/* Simulation Graphs Pop-out (Old one, can be removed or kept) */}
+      {/* {showGraphs && <SimulationGraphs history={simulationHistory} onClose={() => setShowGraphs(false)} />} */}
     </div> 
   );
 };
