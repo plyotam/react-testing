@@ -1,16 +1,16 @@
 {
   "files": {
-    "main.css": "/react-testing/static/css/main.9a5b63ba.css",
-    "main.js": "/react-testing/static/js/main.501c2d97.js",
+    "main.css": "/react-testing/static/css/main.a221d603.css",
+    "main.js": "/react-testing/static/js/main.f95bb842.js",
     "static/js/453.5c3a1f00.chunk.js": "/react-testing/static/js/453.5c3a1f00.chunk.js",
     "static/media/Night_Machine.otf": "/react-testing/static/media/Night_Machine.c296fc7e2961dba38ca3.otf",
     "index.html": "/react-testing/index.html",
-    "main.9a5b63ba.css.map": "/react-testing/static/css/main.9a5b63ba.css.map",
-    "main.501c2d97.js.map": "/react-testing/static/js/main.501c2d97.js.map",
+    "main.a221d603.css.map": "/react-testing/static/css/main.a221d603.css.map",
+    "main.f95bb842.js.map": "/react-testing/static/js/main.f95bb842.js.map",
     "453.5c3a1f00.chunk.js.map": "/react-testing/static/js/453.5c3a1f00.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.9a5b63ba.css",
-    "static/js/main.501c2d97.js"
+    "static/css/main.a221d603.css",
+    "static/js/main.f95bb842.js"
   ]
 }
