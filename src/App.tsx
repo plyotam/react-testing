@@ -7,8 +7,9 @@ import { generateOptimalPath as generateOptimalPathUtil } from './features/pathf
 import { drawCanvasContent } from './features/canvas/drawCanvas';
 import { createCanvasEventHandlers } from './features/canvas/canvasEventHandlers';
 import { v4 as uuidv4 } from 'uuid'; // Import uuid
+import Floating3DView from './components/Floating3DView'; // Import the new 3D view component
 
-const HolonomicPathOptimizer = () => {
+const App = () => {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
@@ -68,6 +69,11 @@ const HolonomicPathOptimizer = () => {
   const [floatingGraphPosition, setFloatingGraphPosition] = useState({ x: window.innerWidth - 500, y: 150 });
   const [isDraggingFloatingGraphs, setIsDraggingFloatingGraphs] = useState(false);
   const [floatingGraphsDragStartOffset, setFloatingGraphsDragStartOffset] = useState({ x: 0, y: 0 });
+
+  const [showFloating3DView, setShowFloating3DView] = useState(false);
+  const [floating3DViewPosition, setFloating3DViewPosition] = useState({ x: window.innerWidth - 650, y: 200 });
+  const [isDraggingFloating3DView, setIsDraggingFloating3DView] = useState(false);
+  const [floating3DViewDragStartOffset, setFloating3DViewDragStartOffset] = useState({ x: 0, y: 0 });
 
   const [displayTime, setDisplayTime] = useState(0);
   const [isScrubbing, setIsScrubbing] = useState(false);
@@ -728,7 +734,9 @@ const HolonomicPathOptimizer = () => {
     isScrubbing, 
     activeWhileInZones,
     eventZones,
-    triggeredEnterZones
+    triggeredEnterZones,
+    commandMarkers,
+    simulationEvents,
   ]);
 
   const updateWaypointByIndex = (index: number, field: keyof Waypoint, value: any) => {
@@ -794,17 +802,40 @@ const HolonomicPathOptimizer = () => {
     setIsDraggingFloatingGraphs(false);
   }, []);
 
+  const handleFloating3DViewMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+    setIsDraggingFloating3DView(true);
+    setFloating3DViewDragStartOffset({
+      x: e.clientX - floating3DViewPosition.x,
+      y: e.clientY - floating3DViewPosition.y,
+    });
+    e.preventDefault();
+  };
+
+  const handleFloating3DViewMouseMove = useCallback((e: MouseEvent) => {
+    if (!isDraggingFloating3DView) return;
+    setFloating3DViewPosition({
+      x: e.clientX - floating3DViewDragStartOffset.x,
+      y: e.clientY - floating3DViewDragStartOffset.y,
+    });
+  }, [isDraggingFloating3DView, floating3DViewDragStartOffset]);
+
+  const handleFloating3DViewMouseUp = useCallback(() => {
+    setIsDraggingFloating3DView(false);
+  }, []);
+
   useEffect(() => {
     const handleGlobalMouseMove = (e: MouseEvent) => {
       if (isDraggingEditor) handleEditorMouseMove(e);
       if (isDraggingFloatingGraphs) handleFloatingGraphMouseMove(e);
+      if (isDraggingFloating3DView) handleFloating3DViewMouseMove(e);
     };
     const handleGlobalMouseUp = () => {
       if (isDraggingEditor) handleEditorMouseUp();
       if (isDraggingFloatingGraphs) handleFloatingGraphMouseUp();
+      if (isDraggingFloating3DView) handleFloating3DViewMouseUp();
     };
 
-    if (isDraggingEditor || isDraggingFloatingGraphs) {
+    if (isDraggingEditor || isDraggingFloatingGraphs || isDraggingFloating3DView) {
       window.addEventListener('mousemove', handleGlobalMouseMove);
       window.addEventListener('mouseup', handleGlobalMouseUp);
     } else {
@@ -817,13 +848,12 @@ const HolonomicPathOptimizer = () => {
     };
   }, [
     isDraggingEditor, handleEditorMouseMove, handleEditorMouseUp, 
-    isDraggingFloatingGraphs, handleFloatingGraphMouseMove, handleFloatingGraphMouseUp
+    isDraggingFloatingGraphs, handleFloatingGraphMouseMove, handleFloatingGraphMouseUp,
+    isDraggingFloating3DView, handleFloating3DViewMouseMove, handleFloating3DViewMouseUp
   ]);
 
   const handleTimeSliderChange = (newTime: number) => {
     if (isPlaying && !isPausedForStopPointRef.current) {
-        // Pause simulation if playing and user starts scrubbing
-        // setIsPlaying(false); // Decided against this for now to allow live update then resume
     }
     setIsScrubbing(true);
     
@@ -894,8 +924,6 @@ const HolonomicPathOptimizer = () => {
 
   const handleTimeSliderMouseUp = () => {
     setIsScrubbing(false);
-    // If simulation was playing and user scrubbed, it might have been paused or continued.
-    // For now, if it was playing, we ensure lastTimestampRef is null so it picks up correctly if it auto-resumes or user presses play.
     if (isPlaying && !isPausedForStopPointRef.current) {
         lastTimestampRef.current = null; 
     }
@@ -994,7 +1022,7 @@ const HolonomicPathOptimizer = () => {
                 field: { ...prev.field, backgroundImage: dataUrl }
             }));
         }
-        showMessage('info', 'Default background loaded.');
+        // showMessage('info', 'Default background loaded.'); // Removed to avoid spamming on HMR
       } else {
         showMessage('error', 'Could not process default background for config.');
       }
@@ -1004,7 +1032,7 @@ const HolonomicPathOptimizer = () => {
     };
     img.src = defaultBgPath;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showMessage]); // Keep minimal dependencies, setConfig is stable if not included
+  }, [showMessage]); // Keep minimal dependencies for default background load.
 
   // useEffect to pre-calculate renderX and renderY for commandMarkers
   useEffect(() => {
@@ -1073,10 +1101,10 @@ const HolonomicPathOptimizer = () => {
       measurePreviewPoint,
       eventZones, 
       commandMarkers,
-    editorMode, // Add editorMode as a dependency
-    canvasMousePosition, // Add canvasMousePosition as a dependency
-    selectedZoneId, // Add selectedZoneId as a dependency for highlighting
-    selectedCommandMarkerId, // Add selectedCommandMarkerId for highlighting
+    editorMode, 
+    canvasMousePosition, 
+    selectedZoneId, 
+    selectedCommandMarkerId, 
     });
   }, [
     config, 
@@ -1085,7 +1113,7 @@ const HolonomicPathOptimizer = () => {
     robotState, 
     optimizedPath, 
     backgroundImage, 
-    metersToPixels, // This is a useCallback, stable if its own deps are stable
+    metersToPixels, 
     isMeasuring, 
     measurePoints, 
     measuredDistance, 
@@ -1096,7 +1124,7 @@ const HolonomicPathOptimizer = () => {
     canvasMousePosition,
     selectedZoneId,
     selectedCommandMarkerId,
-    canvasRef // Though canvasRef itself doesn't change, its availability might gate the effect
+    canvasRef 
   ]);
 
   // Prepare props for AppUI
@@ -1134,14 +1162,35 @@ const HolonomicPathOptimizer = () => {
     onAddEventZone: addEventZone,
     onUpdateEventZone: updateEventZone,
     onDeleteEventZone: deleteEventZone,
-    selectedZoneId, // Pass to AppUI for EventZoneEditor
-    setSelectedZoneId, // Pass to AppUI for EventZoneEditor
-    selectedCommandMarkerId, // Pass to AppUI for CommandMarkerEditor
-    setSelectedCommandMarkerId, // Pass to AppUI for CommandMarkerEditor
-    simulationEvents, // Pass simulation events to AppUI
+    selectedZoneId, 
+    setSelectedZoneId, 
+    selectedCommandMarkerId, 
+    setSelectedCommandMarkerId, 
+    simulationEvents, 
+    showFloating3DView, // New prop for AppUI
+    setShowFloating3DView, // New prop for AppUI
+    setWaypoints, // Add setWaypoints here
+    fieldWidth: config.field.width,
+    fieldHeight: config.field.height,
   };
 
-  return <AppUI {...appUIProps} />;
+  return (
+    <>
+      <AppUI {...appUIProps} />
+      <Floating3DView
+        isVisible={showFloating3DView}
+        onClose={() => setShowFloating3DView(false)}
+        editorPosition={floating3DViewPosition}
+        onDragStart={handleFloating3DViewMouseDown}
+        robotState={robotState}
+        optimizedPath={optimizedPath}
+        displayTime={displayTime}
+        totalPathTime={optimizationMetrics?.totalTime ?? 0}
+        fieldWidth={config.field.width} // Add this
+        fieldHeight={config.field.height} // Add this
+      />
+    </>
+  );
 };
 
-export default HolonomicPathOptimizer;
+export default App;

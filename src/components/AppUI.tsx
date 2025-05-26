@@ -1,22 +1,26 @@
-import React, { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Download, Upload, Settings, Play, RotateCcw, Trash2, Image, Zap, Target, Square, BarChart2, GripVertical, Ruler, X,
-  LayoutGrid, ToyBrick, GitFork // Added new icons
+  LayoutGrid, ToyBrick, GitFork
 } from 'lucide-react';
 import { Waypoint, SimulationDataPoint, OptimizedPathPoint, CommandMarker, EventZone, TriggeredEvent } from '../types';
 import { Config } from '../config/appConfig';
 import WaypointEditorPopup from './WaypointEditorPopup';
 import FloatingGraphPopup from './FloatingGraphPopup';
-import ConfigInput from './ConfigInput'; // Assuming ConfigInput is also a shared component
-import EventZoneEditor from './EventZoneEditor'; // Import EventZoneEditor
-import CommandMarkerEditor from './CommandMarkerEditor'; // Import CommandMarkerEditor
+import ConfigInput from './ConfigInput';
+import EventZoneEditor from './EventZoneEditor';
+import CommandMarkerEditor from './CommandMarkerEditor';
+import { Button } from "./ui/button";
+import { Input } from "./ui/input";
+import { Slider } from "./ui/slider";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 
 // Props definition for AppUI
 export interface AppUIProps {
   pathName: string;
   setPathName: (name: string) => void;
   waypoints: Waypoint[];
-  optimizationMetrics: { totalDistance: number; totalTime: number; /* ... other metrics */ } | null;
+  optimizationMetrics: { totalDistance: number; totalTime: number; maxCurvature: number; maxAcceleration: number; energyConsumption: number; } | null;
   waypointCreationMode: 'hard' | 'guide';
   setWaypointCreationMode: (mode: 'hard' | 'guide') => void;
   editorMode: 'waypoints' | 'addEventZoneCenter' | 'addCommandMarker';
@@ -68,56 +72,76 @@ export interface AppUIProps {
   handleWaypointDragEnd: () => void;
   draggedWaypointSourceIndex: number | null;
 
-  // Command Markers
   commandMarkers: CommandMarker[];
   setCommandMarkers: React.Dispatch<React.SetStateAction<CommandMarker[]>>;
   onAddCommandMarker: (markerData: Omit<CommandMarker, 'id'>) => void;
   onUpdateCommandMarker: (marker: CommandMarker) => void;
   onDeleteCommandMarker: (markerId: string) => void;
 
-  // Event Zones
   eventZones: EventZone[];
   setEventZones: React.Dispatch<React.SetStateAction<EventZone[]>>;
-  onAddEventZone: (zoneData: Omit<EventZone, 'id'>) => void; // Add prop for adding
-  onUpdateEventZone: (zone: EventZone) => void; // Add prop for updating
-  onDeleteEventZone: (zoneId: string) => void; // Add prop for deleting
+  onAddEventZone: (zoneData: Omit<EventZone, 'id'>) => void; 
+  onUpdateEventZone: (zone: EventZone) => void; 
+  onDeleteEventZone: (zoneId: string) => void; 
 
-  // Add any other props that are used directly by the JSX being moved
   pendingEventZoneCreation: { x: number, y: number } | null;
   clearPendingEventZoneCreation: () => void;
   pendingCommandMarkerCreation: { s: number, time: number, x: number, y: number } | null;
   clearPendingCommandMarkerCreation: () => void;
 
-  // Props for selection state from App.tsx
   selectedZoneId: string | null;
   setSelectedZoneId: React.Dispatch<React.SetStateAction<string | null>>;
   selectedCommandMarkerId: string | null;
   setSelectedCommandMarkerId: React.Dispatch<React.SetStateAction<string | null>>;
-  simulationEvents: TriggeredEvent[]; // Add simulationEvents prop
+  simulationEvents: TriggeredEvent[]; 
+
+  showFloating3DView: boolean;
+  setShowFloating3DView: (show: boolean) => void;
+
+  setWaypoints: React.Dispatch<React.SetStateAction<Waypoint[]>>;
+  fieldWidth: number; // Add this
+  fieldHeight: number; // Add this
 }
 
 const AppUI: React.FC<AppUIProps> = (props) => {
   const {
-    pathName, setPathName, waypoints, optimizationMetrics, waypointCreationMode, setWaypointCreationMode,
+    pathName, setPathName,
+    waypoints, optimizationMetrics,
+    waypointCreationMode, setWaypointCreationMode,
     editorMode, setEditorMode,
-    isMeasuring, toggleMeasureMode, showFloatingGraphs, setShowFloatingGraphs, imageInputRef, fileInputRef,
-    exportPath, isPlaying, stopPath, playPath, optimizedPath, simulationSpeedFactor, setSimulationSpeedFactor,
-    clearPath, showConfig, setShowConfig, canvasRef, handleCanvasMouseDown, handleCanvasMouseMove, handleCanvasMouseUp,
-    handleCanvasMouseLeave, displayTime, totalPathTime, handleTimeSliderChange, setIsScrubbing, handleTimeSliderMouseUp,
-    loadBackgroundImage, importPath, selectedWaypoint, setSelectedWaypoint, config, setConfig, updateWaypointByIndex,
-    deleteWaypoint, editorPosition, handleEditorMouseDown, simulationHistory, floatingGraphPosition, 
-    handleFloatingGraphMouseDown, message, handleWaypointDragStart, handleWaypointDragOver, handleWaypointDragLeave,
-    handleWaypointDrop, handleWaypointDragEnd, draggedWaypointSourceIndex,
-    commandMarkers, setCommandMarkers, 
+    isMeasuring, toggleMeasureMode,
+    showFloatingGraphs, setShowFloatingGraphs,
+    imageInputRef, fileInputRef,
+    exportPath, isPlaying, stopPath, playPath,
+    optimizedPath, simulationSpeedFactor, setSimulationSpeedFactor,
+    clearPath, showConfig, setShowConfig,
+    canvasRef, handleCanvasMouseDown, handleCanvasMouseMove, handleCanvasMouseUp, handleCanvasMouseLeave,
+    displayTime, totalPathTime, handleTimeSliderChange, setIsScrubbing, handleTimeSliderMouseUp,
+    loadBackgroundImage, importPath,
+    selectedWaypoint, setSelectedWaypoint,
+    config, setConfig,
+    updateWaypointByIndex, deleteWaypoint,
+    editorPosition, handleEditorMouseDown,
+    simulationHistory, floatingGraphPosition, handleFloatingGraphMouseDown,
+    message,
+    handleWaypointDragStart, handleWaypointDragOver, handleWaypointDragLeave, handleWaypointDrop, handleWaypointDragEnd,
+    draggedWaypointSourceIndex,
+    commandMarkers, setCommandMarkers,
     onAddCommandMarker, onUpdateCommandMarker, onDeleteCommandMarker,
     eventZones, setEventZones,
     onAddEventZone, onUpdateEventZone, onDeleteEventZone,
     pendingEventZoneCreation, clearPendingEventZoneCreation,
     pendingCommandMarkerCreation, clearPendingCommandMarkerCreation,
-    selectedZoneId, setSelectedZoneId, // Destructure new props
-    selectedCommandMarkerId, setSelectedCommandMarkerId, // Destructure new props
-    simulationEvents // Destructure simulationEvents
+    selectedZoneId, setSelectedZoneId,
+    selectedCommandMarkerId, setSelectedCommandMarkerId,
+    simulationEvents,
+    showFloating3DView, setShowFloating3DView,
+    setWaypoints,
+    fieldWidth,
+    fieldHeight,
   } = props;
+
+  const selectedWaypointData = selectedWaypoint !== null ? waypoints[selectedWaypoint] : null;
 
   // Effect to update canvas cursor based on editor mode
   useEffect(() => {
@@ -203,6 +227,13 @@ const AppUI: React.FC<AppUIProps> = (props) => {
                 >
                   <BarChart2 size={20} />
                 </button>
+                 <button
+                  onClick={() => setShowFloating3DView(true)}
+                  title="Toggle 3D View"
+                  className="p-2 bg-background-tertiary text-text-secondary rounded-lg hover:bg-accent-primary hover:text-white transform hover:scale-105 shadow-md"
+                >
+                  <ToyBrick size={20} />
+                </button>
                 <button
                   onClick={() => setEditorMode('addEventZoneCenter')}
                   title="Add Event Zone by Clicking on Canvas"
@@ -211,7 +242,7 @@ const AppUI: React.FC<AppUIProps> = (props) => {
                                 ? 'bg-accent-warning text-white' 
                                 : 'bg-background-tertiary text-text-secondary hover:bg-accent-warning'}`}
                 >
-                  Add Zone (Canvas)
+                  Zone
                 </button>
                 <button
                   onClick={() => setEditorMode('addCommandMarker')}
@@ -223,7 +254,7 @@ const AppUI: React.FC<AppUIProps> = (props) => {
                                 : 'bg-background-tertiary text-text-secondary hover:bg-accent-info'} 
                               ${optimizedPath.length === 0 ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  Add Marker (Path)
+                  Marker
                 </button>
               </div>
               <div className="flex gap-2">
@@ -286,8 +317,7 @@ const AppUI: React.FC<AppUIProps> = (props) => {
               </div>
             </div>
           </div>
-          {/* Canvas Container and Slider will go here */}
-           {/* Canvas Container */}
+          {/* Canvas Container */}
           <div className="bg-background-primary/70 rounded-lg m-4 p-2 flex-grow flex items-center justify-center relative overflow-hidden">
             <canvas
               ref={canvasRef}
@@ -298,7 +328,6 @@ const AppUI: React.FC<AppUIProps> = (props) => {
               className="border-2 border-border-color-primary rounded-md object-contain"
             />
           </div>
-
           {/* Simulation Time Slider */}
           {optimizedPath.length > 0 && (
             <div className="m-4 p-3 bg-background-secondary/50 rounded-lg shadow-md flex items-center gap-3">
@@ -316,7 +345,6 @@ const AppUI: React.FC<AppUIProps> = (props) => {
               />
             </div>
           )}
-
           {/* Hidden file inputs */}
           <input
             ref={imageInputRef}
@@ -334,34 +362,6 @@ const AppUI: React.FC<AppUIProps> = (props) => {
           />
         </div>
       </div>
-      
-      {/* Floating Waypoint Editor */}
-      {selectedWaypoint !== null && waypoints[selectedWaypoint] && (
-        <WaypointEditorPopup
-          waypoint={waypoints[selectedWaypoint]}
-          waypointIndex={selectedWaypoint}
-          config={{
-            waypoint: config.waypoint,
-            robot: config.robot
-          }}
-          onUpdateWaypoint={updateWaypointByIndex}
-          onDeleteWaypoint={deleteWaypoint}
-          onClose={() => setSelectedWaypoint(null)}
-          editorPosition={editorPosition}
-          onDragStart={handleEditorMouseDown}
-        />
-      )}
-      
-      {/* Floating Graph Popup */}
-      <FloatingGraphPopup
-          history={simulationHistory}
-          onClose={() => setShowFloatingGraphs(false)}
-          editorPosition={floatingGraphPosition}
-          onDragStart={handleFloatingGraphMouseDown}
-          isVisible={showFloatingGraphs}
-          currentTime={displayTime}
-          triggeredEvents={simulationEvents} // Pass to FloatingGraphPopup
-      />
 
       {/* Sidebar - Configuration Panel */}
       {showConfig && (
@@ -373,10 +373,10 @@ const AppUI: React.FC<AppUIProps> = (props) => {
         >
           <div 
             className="flex justify-between items-center pb-2 mb-3 border-b border-border-color-secondary cursor-move select-none"
-            onMouseDown={handleEditorMouseDown} // This makes the whole header draggable
+            onMouseDown={handleEditorMouseDown}
           >
-            <div className="flex items-center"> {/* Group icon and title */}
-              <GripVertical size={20} className="mr-2 text-text-tertiary" /> {/* Added Grip Icon */}
+            <div className="flex items-center">
+              <GripVertical size={20} className="mr-2 text-text-tertiary" />
               <h2 className="text-xl font-semibold text-text-primary">Configuration & Tools</h2>
             </div>
             <button 
@@ -388,7 +388,6 @@ const AppUI: React.FC<AppUIProps> = (props) => {
             </button>
           </div>
           
-          {/* Tab Navigation */}
           <div className="bg-background-tertiary/50 rounded-xl shadow-lg p-5 space-y-4 backdrop-blur-sm">
             <h3 className="font-bold text-lg mb-4 flex items-center gap-2 text-accent-primary">
               <Settings size={20} />
@@ -487,7 +486,6 @@ const AppUI: React.FC<AppUIProps> = (props) => {
             </div>
           </div>
 
-          {/* Section for Command Markers */}
           <div className="bg-background-tertiary/50 rounded-xl shadow-lg p-5 backdrop-blur-sm mt-5">
             <h3 className="font-bold text-lg mb-4 text-accent-primary">Command Markers</h3>
             <CommandMarkerEditor 
@@ -498,12 +496,11 @@ const AppUI: React.FC<AppUIProps> = (props) => {
               onDeleteCommandMarker={onDeleteCommandMarker}
               pendingCommandMarkerCreation={pendingCommandMarkerCreation}
               clearPendingCommandMarkerCreation={clearPendingCommandMarkerCreation}
-              selectedCommandMarkerId={selectedCommandMarkerId} // Pass prop
-              setSelectedCommandMarkerId={setSelectedCommandMarkerId} // Pass prop
+              selectedCommandMarkerId={selectedCommandMarkerId}
+              setSelectedCommandMarkerId={setSelectedCommandMarkerId}
             />
           </div>
 
-          {/* Section for Event Zones */}
           <div className="bg-background-tertiary/50 rounded-xl shadow-lg p-5 backdrop-blur-sm mt-5">
             <h3 className="font-bold text-lg mb-4 text-accent-primary">Event Zones</h3>
             <EventZoneEditor 
@@ -513,20 +510,48 @@ const AppUI: React.FC<AppUIProps> = (props) => {
               onDeleteEventZone={onDeleteEventZone}
               pendingEventZoneCreation={pendingEventZoneCreation}
               clearPendingEventZoneCreation={clearPendingEventZoneCreation}
-              selectedZoneId={selectedZoneId} // Pass prop
-              setSelectedZoneId={setSelectedZoneId} // Pass prop
+              selectedZoneId={selectedZoneId}
+              setSelectedZoneId={setSelectedZoneId}
             />
           </div>
         </div>
       )}
 
-      {/* Message Box */}
+      {/* Floating Waypoint Editor */}
+      {selectedWaypointData && (
+        <WaypointEditorPopup 
+          waypoint={selectedWaypointData} 
+          waypointIndex={selectedWaypoint!} 
+          config={config} 
+          onUpdateWaypoint={updateWaypointByIndex} 
+          onDeleteWaypoint={deleteWaypoint} 
+          onClose={() => setSelectedWaypoint(null)} 
+          editorPosition={editorPosition}
+          onDragStart={handleEditorMouseDown} 
+        />
+      )}
+      
+      {/* Floating Graph Popup */}
+      <FloatingGraphPopup 
+        history={simulationHistory} 
+        isVisible={showFloatingGraphs} 
+        onClose={() => setShowFloatingGraphs(false)} 
+        editorPosition={floatingGraphPosition} 
+        onDragStart={handleFloatingGraphMouseDown} 
+        currentTime={displayTime}
+        triggeredEvents={simulationEvents}
+      />
+
+      {/* Message Display */}
       {message && (
-        <div className={`fixed top-5 right-5 p-4 rounded-lg shadow-xl text-white text-sm z-50 transform transition-all duration-300 ease-in-out hover:scale-105 ${message.type === 'error' ? 'bg-error-color' : message.type === 'warn' ? 'bg-warning-color' : 'bg-gradient-accent'}`}>
+        <div className={`fixed bottom-4 right-4 p-4 rounded-lg shadow-lg text-white 
+          ${message.type === 'error' ? 'bg-red-600' : message.type === 'warn' ? 'bg-yellow-500' : 'bg-blue-600'}
+          z-[100] transition-opacity duration-300 opacity-100`}
+        >
           {message.text}
         </div>
       )}
-    </div> 
+    </div>
   );
 };
 
